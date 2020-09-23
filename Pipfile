@@ -6,14 +6,13 @@ verify_ssl = true
 [dev-packages]
 pytest = "*"
 wheel = "*"
+setuptools = "*"
 
 [packages]
 coloredlogs = "*"
 pandas = "*"
-ipykernel = "*"
 tabulate = "*"
 jinja2 = "*"
-parallel-ssh = "*"
 humanize = "*"
 
 [requires]
