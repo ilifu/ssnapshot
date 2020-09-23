@@ -1,0 +1,20 @@
+[[source]]
+name = "pypi"
+url = "https://pypi.org/simple"
+verify_ssl = true
+
+[dev-packages]
+pytest = "*"
+wheel = "*"
+
+[packages]
+coloredlogs = "*"
+pandas = "*"
+ipykernel = "*"
+tabulate = "*"
+jinja2 = "*"
+parallel-ssh = "*"
+humanize = "*"
+
+[requires]
+python_version = "3.8"
