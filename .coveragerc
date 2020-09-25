@@ -1,0 +1,10 @@
+[run]
+omit =
+    .venv/*
+    tests/*
+    dist/*
+    ssnapshot_kennedydane.egg-info/*
+    build/*
+[paths]
+source =
+    ssnapshot/*
