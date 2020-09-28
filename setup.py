@@ -4,7 +4,7 @@ with open('README.md', 'r') as fh:
     long_description = fh.read()
 
 setuptools.setup(
-    name='ssnapshot-kennedydane', # Replace with your own username
+    name='ssnapshot',  # Replace with your own username
     version='0.0.1',
     author='Dane Kennedy',
     author_email='dane@idia.ac.za',
@@ -13,6 +13,13 @@ setuptools.setup(
     long_description_content_type='text/markdown',
     url='https://github.com/ilifu/ssnapshot',
     packages=setuptools.find_packages(),
+    install_requires=[
+        'coloredlogs',
+        'humanize',
+        'pandas',
+        'jinja2',
+        'tabulate',
+    ],
     classifiers=[
         'Programming Language :: Python :: 3.8',
         'License :: OSI Approved :: MIT License',
