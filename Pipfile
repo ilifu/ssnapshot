@@ -10,6 +10,7 @@ setuptools = "*"
 model-mommy = "*"
 pytest-mock = "*"
 pytest-cov = "*"
+twine = "*"
 
 [packages]
 coloredlogs = "*"

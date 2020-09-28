@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 from datetime import timedelta
 import logging
 from io import StringIO
@@ -11,19 +13,20 @@ from pandas import DataFrame, read_csv
 
 def dhhmmss_to_seconds(dhhmmss: str) -> int:
     days = 0
-    if '-' in dhhmmss:
-        days, dhhmmss = dhhmmss.split('-')
-        days = int(days)
-    while dhhmmss.count(':') < 2:
-        dhhmmss = f'00:{dhhmmss}'
     try:
+        if '-' in dhhmmss:
+            days, dhhmmss = dhhmmss.split('-')
+            days = int(days)
+        while dhhmmss.count(':') < 2:
+            dhhmmss = f'00:{dhhmmss}'
+
         h, m, s = map(int, dhhmmss.split(':'))
         seconds = ((days*24+h)*60+m)*60+s
         logging.debug(f'Converting "{ dhhmmss }" to seconds: { seconds }')
         return seconds
-    except ValueError:
-        logging.debug(f'error trying to convert { dhhmmss } to seconds')
-        return 0
+    except (ValueError, TypeError, AttributeError):
+        logging.error(f'Error trying to convert { dhhmmss } to seconds. Returning 0.')
+    return 0
 
 
 def seconds_to_hhmmss(seconds: int) -> str:
@@ -143,7 +146,7 @@ def grouped(iterable, n=2):
     return zip(*[iter(iterable)]*n)
 
 
-def create_job_summaries(squeue_data: DataFrame) -> Tuple[DataFrame, DataFrame]:
+def create_job_summaries(squeue_data: DataFrame, human_readable=True) -> Tuple[DataFrame, DataFrame]:
 
     squeue_data['CPUTIME_LEFT_SECONDS'] = squeue_data['TIME_LEFT_SECONDS'] * squeue_data['CPUS']
 
@@ -153,15 +156,15 @@ def create_job_summaries(squeue_data: DataFrame) -> Tuple[DataFrame, DataFrame]:
         'CPUTIME_LEFT_SECONDS': ['sum'],
     }).sort_values(['STATE', ('CPUTIME_LEFT_SECONDS', 'sum')], ascending=False)
 
-    aggregated_grouped['CPUTIME_LEFT_SECONDS', 'HR'] = aggregated_grouped['CPUTIME_LEFT_SECONDS', 'sum'].apply(
-        seconds_to_hhmmss,
-    )
-    del aggregated_grouped[('CPUTIME_LEFT_SECONDS', 'sum')]
+    if human_readable:
+        aggregated_grouped['CPUTIME_LEFT_SECONDS', 'HR'] = aggregated_grouped['CPUTIME_LEFT_SECONDS', 'sum'].apply(
+            seconds_to_hhmmss,
+        )
+        del aggregated_grouped[('CPUTIME_LEFT_SECONDS', 'sum')]
+        aggregated_grouped.rename(columns={'CPUS': 'CPUs', 'CPUTIME_LEFT_SECONDS': 'CPU time remaining'}, inplace=True)
 
     aggregated_grouped.columns = aggregated_grouped.columns.get_level_values(0)
-
     aggregated_grouped.index.names = ['State', 'Account']
-    aggregated_grouped.rename(columns={'CPUS': 'CPUs', 'CPUTIME_LEFT_SECONDS': 'CPU time remaining'}, inplace=True)
 
     running_jobs = aggregated_grouped.loc["RUNNING"]
     pending_jobs = aggregated_grouped.loc["PENDING"]
@@ -283,5 +286,4 @@ def create_partition_summary(node_data: DataFrame) -> DataFrame:
     node_data_aggregated.columns = node_data_aggregated.columns.get_level_values(0)
 
     return node_data_aggregated
-
 

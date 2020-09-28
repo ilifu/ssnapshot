@@ -9,7 +9,7 @@ from ssnapshot.ssnapshot import (
     get_sinfo,
     get_squeue,
     get_sstat,
-    seconds_to_hhmmss
+    seconds_to_hhmmss,
 )
 
 
@@ -26,7 +26,7 @@ class TestCreatePartitionSummary:
     pass
 
 
-class TestDHHMMSSToSeconds:
+class TestFunction_dhhmmss_to_seconds:
     def test_bad_input_returns_zero(self):
         assert dhhmmss_to_seconds('a') == 0
         assert dhhmmss_to_seconds('a-2') == 0
@@ -34,10 +34,10 @@ class TestDHHMMSSToSeconds:
         assert dhhmmss_to_seconds('') == 0
         assert dhhmmss_to_seconds([]) == 0
         assert dhhmmss_to_seconds(1) == 0
-        assert dhhmmss_to_seconds([':',':']) == 0
+        assert dhhmmss_to_seconds([':', ':']) == 0
 
-    def test_logging_on_bad_input(self, caplog):
-        _ = dhhmmss_to_seconds('a')
+    def test_bad_input_logs_error(self, caplog):
+        dhhmmss_to_seconds('a')
         assert len(caplog.records) == 1
         record = caplog.records[0]
         assert record.levelno == ERROR
@@ -62,7 +62,6 @@ class TestDHHMMSSToSeconds:
 
 
 
-
 class TestExpandCompressedSlurmNodeList:
     pass
 
@@ -81,5 +80,12 @@ class TestGetSstat:
         assert False
 
 
-class TestSecondsToHHMMSS:
-    pass
+class TestFunction_seconds_to_hhmmss:
+    def test_seconds_gives_correct_output(self):
+        assert seconds_to_hhmmss(45) == '0:00:45'
+
+    def test_minutes_gives_correct_output(self):
+        assert seconds_to_hhmmss(1*60+45) == '0:01:45'
+
+    def test_hours_gives_correct_output(self):
+        assert seconds_to_hhmmss(3*3600+2*60+1) == '3:02:01'

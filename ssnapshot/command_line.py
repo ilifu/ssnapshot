@@ -21,7 +21,7 @@ from ssnapshot.ssnapshot import (
 def create_arg_parser() -> ArgumentParser:
     new_parser = ArgumentParser(
         description='ssnapshot returns a brief summary of the status of slurm',
-        formatter_class=ArgumentDefaultsHelpFormatter,
+        #formatter_class=ArgumentDefaultsHelpFormatter,
     )
     new_parser.add_argument(
         '--verbose', '-v',
@@ -29,12 +29,27 @@ def create_arg_parser() -> ArgumentParser:
         action='count',
         help='0×v = ERRORs, 1×v = WARNINGs, 2×v = INFOs and 3×v = DEBUGs',
     )
+
+    human_readable_parser = new_parser.add_mutually_exclusive_group(required=False)
+    human_readable_parser.add_argument(
+        '--human-readable',
+        dest='human_readable',
+        action='store_true',
+        help='output is easily human readable. (Default)',
+    )
+    human_readable_parser.add_argument(
+        '--no-human-readable',
+        dest='human_readable',
+        action='store_false',
+        help='output is machine readable.',
+    )
+
     new_parser.add_argument(
         '--jobs', '-j',
         dest='tables',
         action='append_const',
         const='jobs',
-        help='Show running / pending job summary information',
+        help='Show running / pending job summary information. (Default: False)',
     )
     new_parser.add_argument(
         '--job-detail',
@@ -44,7 +59,7 @@ def create_arg_parser() -> ArgumentParser:
         const=getuser(),
         help=(
             'Show job details. Requires elevated privileges to get information from other users\' jobs. '
-            'Use "ALL" to view all users jobs.'
+            'Use "ALL" to view all users jobs. (Default: False)'
         ),
     )
     new_parser.add_argument(
@@ -52,7 +67,7 @@ def create_arg_parser() -> ArgumentParser:
         dest='tables',
         action='append_const',
         const='partitions',
-        help='Show partition summary information',
+        help='Show partition summary information. (Default: False)',
     )
 
     output_group = new_parser.add_mutually_exclusive_group()
@@ -77,12 +92,74 @@ def create_arg_parser() -> ArgumentParser:
         const='markdown',
         help='Output is markdown',
     )
+    output_group.add_argument(
+        '--prometheus',
+        dest='output',
+        action='store_const',
+        const='prometheus',
+        help='Output is for prometheus exporter',
+    )
 
     new_parser.set_defaults(
         output='markdown',
         tables=[],
+        human_readable=True,
     )
     return new_parser
+
+
+def generate_markdown(output: dict) -> str:
+    lines = []
+    header = output.get('header')
+    if header:
+        title = f'{header.get("value")}'
+        time = header.get('time')
+        if time:
+            time = f' ({time})'
+        lines.append(f'# {title}{time}')
+    for name, value in output.items():
+        output_type = value.get('type')
+        if output_type == 'table':
+            table_md = value.get('value').to_markdown()
+            lines.append(f'## {name}\n{table_md}\n\n')
+    return '\n'.join(lines)
+
+
+def generate_html(output: dict) -> str:
+    lines = []
+    header = output.get('header')
+    if header:
+        title = f'{header.get("value")}'
+        time = header.get('time')
+        if time:
+            time = f' ({time})'
+        lines.append(f'<h1>{title}{time}</h1>')
+    for name, value in output.items():
+        output_type = value.get('type')
+        if output_type == 'table':
+            table_html = value.get('value').to_html()
+            lines.append(f'<h2>{name}</h2>\n{table_html}\n')
+    return '\n'.join(lines)
+
+
+def generate_json(output: dict) -> str:
+    for key, value in output.items():
+        value_type = value.get('type')
+        if value_type == 'table':
+            value['value'] = value.get('value').to_dict()
+    return dumps(output, indent=2)
+
+
+def generate_prometheus(output: dict) -> str:
+    lines = []
+    for key, value in output.items():
+        output_type = value.get('type')
+        if output_type == 'table':
+            table_name = key.lower().replace(' ', '_')
+            for row in value.iterrows():
+                for column in value.columns:
+                    column_name = column.lower().replace(' ', '_')
+                    lines.append(f'ssnapshot_{table_name}_{column_name}')
 
 
 def main():
@@ -132,39 +209,17 @@ def main():
         }
 
     if args.output == 'markdown':
-        header = output.get('header')
-        if header:
-            title = f'{header.get("value")}'
-            time = header.get('time')
-            if time:
-                time = f' ({time})'
-            print(f'# { title }{ time }')
-        for name, value in output.items():
-            output_type = value.get('type')
-            if output_type == 'table':
-                table_md = value.get('value').to_markdown()
-                print(f'## {name}\n{table_md}\n\n')
+        print(generate_markdown(output))
 
     if args.output == 'json':
-        for key, value in output.items():
-            value_type = value.get('type')
-            if value_type == 'table':
-                value['value'] = value.get('value').to_dict()
-        print(dumps(output, indent=2))
+        print(generate_json(output))
 
     if args.output == 'html':
-        header = output.get('header')
-        if header:
-            title = f'{header.get("value")}'
-            time = header.get('time')
-            if time:
-                time = f' ({time})'
-            print(f'<h1>{title}{time}</h1>')
-        for name, value in output.items():
-            output_type = value.get('type')
-            if output_type == 'table':
-                table_html = value.get('value').to_html()
-                print(f'<h2>{name}</h2>\n{table_html}\n')
+        print(generate_html(output))
+
+    if args.output == 'prometheus':
+        print(generate_prometheus(output))
+
 
 if __name__ == '__main__':
     main()
