@@ -1,6 +1,6 @@
 # Project Description
 
-ssnapshot it a utility for producing summaries of the state of a slurm cluster.
+ssnapshot is a utility for producing summaries of the state of a slurm cluster.
 
 ## Features
 
