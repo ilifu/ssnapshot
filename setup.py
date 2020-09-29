@@ -1,11 +1,11 @@
 import setuptools
 
-with open('README.md', 'r') as fh:
+with open('README.pypi.md', 'r') as fh:
     long_description = fh.read()
 
 setuptools.setup(
     name='ssnapshot',  # Replace with your own username
-    version='0.0.1',
+    version='0.0.2a1',
     author='Dane Kennedy',
     author_email='dane@idia.ac.za',
     description='A utility to generate a snapshot of slurm\'s state',
