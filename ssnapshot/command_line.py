@@ -152,14 +152,19 @@ def generate_json(output: dict) -> str:
 
 def generate_prometheus(output: dict) -> str:
     lines = []
+    timestamp = output.get('header', {}).get('time')
+    if not timestamp:
+        timestamp=datetime.now()
     for key, value in output.items():
         output_type = value.get('type')
         if output_type == 'table':
             table_name = key.lower().replace(' ', '_')
-            for row in value.iterrows():
-                for column in value.columns:
+            table = value.get('value')
+            for row_index, row in table.iterrows():
+                for column_number, column in enumerate(table.columns):
                     column_name = column.lower().replace(' ', '_')
-                    lines.append(f'ssnapshot_{table_name}_{column_name}')
+                    lines.append(f'ssnapshot_{table_name}_{column_name}{{label="{row_index}"}} {row[column_number]} {timestamp.timestamp()}')
+    return '\n'.join(lines)
 
 
 def main():
@@ -175,13 +180,16 @@ def main():
     if args.verbose >= 3:
         coloredlogs_install(level='DEBUG')
 
-    output = OrderedDict([('header', {'value': 'Slurm Snapshot', 'time': str(datetime.now())})])
+    if args.output == 'prometheus':
+        args.human_readable=False
+
+    output = OrderedDict([('header', {'value': 'Slurm Snapshot', 'time': datetime.now()})])
 
     if "jobs" in args.tables or args.job_detail:
         squeue = get_squeue()
         squeue.set_index('JOBID', inplace=True)
         if "jobs" in args.tables:
-            running, pending = create_job_summaries(squeue)
+            running, pending = create_job_summaries(squeue, args.human_readable)
             output['Running Jobs'] = {
                 'type': 'table',
                 'value': running,
@@ -198,7 +206,6 @@ def main():
                 'value': job_detail_summary,
             }
 #            print(squeue.merge(job_detail, left_on='JOBID.1', right_on='JobID'))
-
 
     if "partitions" in args.tables:
         sinfo = get_sinfo()

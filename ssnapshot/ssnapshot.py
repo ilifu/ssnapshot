@@ -8,7 +8,7 @@ from subprocess import PIPE, run
 from typing import Tuple
 
 from humanize import naturalsize, naturaldelta
-from pandas import DataFrame, read_csv
+from pandas import DataFrame, read_csv, to_numeric
 
 
 def dhhmmss_to_seconds(dhhmmss: str) -> int:
@@ -119,9 +119,13 @@ def get_squeue() -> DataFrame:
 
 
 def get_sinfo() -> DataFrame:
-    exit_status, stdout, stderr = run_command('sinfo', ['-N', '--format=%all'])
+    # exit_status, stdout, stderr = run_command('sinfo', ['-N', '--format=%all'])
+    exit_status, stdout, stderr = run_command('sinfo', ['-N', '--format="%n|%e|%C|%m|%O|%R|%c"'])
     sinfo_data = read_csv(StringIO(stdout), sep='|')
+    print(sinfo_data)
+    sinfo_data['CPU_LOAD '] = to_numeric(sinfo_data['CPU_LOAD '], errors='coerce')
     logging.debug(f'sinfo output: { sinfo_data }')
+
     return sinfo_data
 
 
@@ -162,6 +166,8 @@ def create_job_summaries(squeue_data: DataFrame, human_readable=True) -> Tuple[D
         )
         del aggregated_grouped[('CPUTIME_LEFT_SECONDS', 'sum')]
         aggregated_grouped.rename(columns={'CPUS': 'CPUs', 'CPUTIME_LEFT_SECONDS': 'CPU time remaining'}, inplace=True)
+    else:
+        aggregated_grouped.rename(columns={'CPUS': 'cpus_total', 'CPUTIME_LEFT_SECONDS': 'cputime_remaining_seconds_total'}, inplace=True)
 
     aggregated_grouped.columns = aggregated_grouped.columns.get_level_values(0)
     aggregated_grouped.index.names = ['State', 'Account']
@@ -227,43 +233,44 @@ def create_job_detail_summary(job_detail: DataFrame) -> DataFrame:
 
 
 def create_partition_summary(node_data: DataFrame) -> DataFrame:
-    node_data = node_data.drop([
-        "ACTIVE_FEATURES",
-        "TMP_DISK",
-        "AVAIL_FEATURES",
-        "GROUPS",
-        "OVERSUBSCRIBE",
-        "TIMELIMIT",
-        "PRIO_TIER",
-        "ROOT",
-        "JOB_SIZE",
-        "USER",
-        "VERSION",
-        "WEIGHT",
-        "S:C:T",
-        "NODES(A/I) ",
-        "MAX_CPUS_PER_NODE ",
-        "NODES ",
-        "REASON ",
-        "NODES(A/I/O/T) ",
-        "TIMESTAMP ",
-        "PRIO_JOB_FACTOR ",
-        "DEFAULTTIME ",
-        "PREEMPT_MODE ",
-        "NODELIST ",
-        "PARTITION .1",
-        "ALLOCNODES ",
-        "USER ",
-        "CLUSTER ",
-        "SOCKETS ",
-        "CORES ",
-        "THREADS ",
-    ], axis=1)
+    # node_data = node_data.drop([
+    #     "ACTIVE_FEATURES",
+    #     "TMP_DISK",
+    #     "AVAIL_FEATURES",
+    #     "GROUPS",
+    #     "OVERSUBSCRIBE",
+    #     "TIMELIMIT",
+    #     "PRIO_TIER",
+    #     "ROOT",
+    #     "JOB_SIZE",
+    #     "USER",
+    #     "VERSION",
+    #     "WEIGHT",
+    #     "S:C:T",
+    #     "NODES(A/I) ",
+    #     "MAX_CPUS_PER_NODE ",
+    #     "NODES ",
+    #     "REASON ",
+    #     "NODES(A/I/O/T) ",
+    #     "TIMESTAMP ",
+    #     "PRIO_JOB_FACTOR ",
+    #     "DEFAULTTIME ",
+    #     "PREEMPT_MODE ",
+    #     "NODELIST ",
+    #     "PARTITION .1",
+    #     "ALLOCNODES ",
+    #     "USER ",
+    #     "CLUSTER ",
+    #     "SOCKETS ",
+    #     "CORES ",
+    #     "THREADS ",
+    # ], axis=1)
 
     node_data["CPUS Allocated"] = node_data['CPUS(A/I/O/T) '].apply(lambda x: int(x.split('/')[0]))
     node_data["CPUS Idle"] = node_data['CPUS(A/I/O/T) '].apply(lambda x: int(x.split('/')[1]))
     node_data["CPUS Total"] = node_data['CPUS(A/I/O/T) '].apply(lambda x: int(x.split('/')[3]))
     node_data = node_data.drop(['CPUS(A/I/O/T) '], axis=1)
+#    print(node_data['CPUS Allocated'])
     node_data["CPUS Load / Allocated"] = node_data['CPU_LOAD '].divide(node_data['CPUS Allocated'])
 
     node_data_grouped = node_data.groupby(['PARTITION '])
