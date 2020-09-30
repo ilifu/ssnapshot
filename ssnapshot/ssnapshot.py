@@ -5,10 +5,10 @@ import logging
 from io import StringIO
 import re
 from subprocess import PIPE, run
-from typing import Tuple
+from typing import Tuple, List
 
 from humanize import naturalsize, naturaldelta
-from pandas import DataFrame, read_csv, to_numeric
+from pandas import DataFrame, read_csv
 
 
 def dhhmmss_to_seconds(dhhmmss: str) -> int:
@@ -121,9 +121,15 @@ def get_squeue() -> DataFrame:
 def get_sinfo() -> DataFrame:
     # exit_status, stdout, stderr = run_command('sinfo', ['-N', '--format=%all'])
     exit_status, stdout, stderr = run_command('sinfo', ['-N', '--format="%n|%e|%C|%m|%O|%R|%c"'])
-    sinfo_data = read_csv(StringIO(stdout), sep='|')
-    print(sinfo_data)
-    sinfo_data['CPU_LOAD '] = to_numeric(sinfo_data['CPU_LOAD '], errors='coerce')
+    sinfo_data = read_csv(
+        StringIO(stdout),
+        sep='|',
+        dtype={
+            'CPU_LOAD': 'Float64',
+            'CPUS': 'Int32'
+        }
+    )
+    # sinfo_data['CPU_LOAD'] = to_numeric(sinfo_data['CPU_LOAD'], errors='coerce')
     logging.debug(f'sinfo output: { sinfo_data }')
 
     return sinfo_data
@@ -150,7 +156,7 @@ def grouped(iterable, n=2):
     return zip(*[iter(iterable)]*n)
 
 
-def create_job_summaries(squeue_data: DataFrame, human_readable=True) -> Tuple[DataFrame, DataFrame]:
+def create_job_summaries(squeue_data: DataFrame, human_readable: bool = True) -> Tuple[DataFrame, DataFrame]:
 
     squeue_data['CPUTIME_LEFT_SECONDS'] = squeue_data['TIME_LEFT_SECONDS'] * squeue_data['CPUS']
 
@@ -165,9 +171,15 @@ def create_job_summaries(squeue_data: DataFrame, human_readable=True) -> Tuple[D
             seconds_to_hhmmss,
         )
         del aggregated_grouped[('CPUTIME_LEFT_SECONDS', 'sum')]
-        aggregated_grouped.rename(columns={'CPUS': 'CPUs', 'CPUTIME_LEFT_SECONDS': 'CPU time remaining'}, inplace=True)
+        aggregated_grouped.rename(
+            columns={'CPUS': 'CPUs', 'CPUTIME_LEFT_SECONDS': 'CPU time remaining'},
+            inplace=True,
+        )
     else:
-        aggregated_grouped.rename(columns={'CPUS': 'cpus_total', 'CPUTIME_LEFT_SECONDS': 'cputime_remaining_seconds_total'}, inplace=True)
+        aggregated_grouped.rename(
+            columns={'CPUS': 'cpus_total', 'CPUTIME_LEFT_SECONDS': 'cputime_remaining_seconds_total'},
+            inplace=True,
+        )
 
     aggregated_grouped.columns = aggregated_grouped.columns.get_level_values(0)
     aggregated_grouped.index.names = ['State', 'Account']
@@ -178,7 +190,7 @@ def create_job_summaries(squeue_data: DataFrame, human_readable=True) -> Tuple[D
     return running_jobs, pending_jobs
 
 
-def create_job_detail_summary(job_detail: DataFrame) -> DataFrame:
+def create_job_detail_summary(job_detail: DataFrame, human_readable=True) -> DataFrame:
     def calc_cpu_time(row):
         cpu_max = row['TIME_SECONDS']*row['CPUS']
         total_used = row['AveCPU_SECONDS']*row['NODES']
@@ -203,7 +215,9 @@ def create_job_detail_summary(job_detail: DataFrame) -> DataFrame:
         memory_allocated = mem_str_to_bytes(row['MIN_MEMORY']) * row['NODES']
         memory_used = mem_str_to_bytes(row['MaxRSS']) * row['NODES']
         percentage_used = memory_used / memory_allocated if memory_allocated != 0 else 0
-        return f'{naturalsize(memory_used, binary=True)} / {naturalsize(memory_allocated, binary=True)} ({int(percentage_used*100)}%)'
+        if human_readable:
+            return f'{naturalsize(memory_used, binary=True)} / {naturalsize(memory_allocated, binary=True)} ({int(percentage_used*100)}%)'
+        return f'{memory_used} / {memory_allocated} ({int(percentage_used*100)}%)'
 
     job_detail = job_detail.drop([
         'ACCOUNT',
@@ -232,65 +246,48 @@ def create_job_detail_summary(job_detail: DataFrame) -> DataFrame:
     return job_detail
 
 
-def create_partition_summary(node_data: DataFrame) -> DataFrame:
-    # node_data = node_data.drop([
-    #     "ACTIVE_FEATURES",
-    #     "TMP_DISK",
-    #     "AVAIL_FEATURES",
-    #     "GROUPS",
-    #     "OVERSUBSCRIBE",
-    #     "TIMELIMIT",
-    #     "PRIO_TIER",
-    #     "ROOT",
-    #     "JOB_SIZE",
-    #     "USER",
-    #     "VERSION",
-    #     "WEIGHT",
-    #     "S:C:T",
-    #     "NODES(A/I) ",
-    #     "MAX_CPUS_PER_NODE ",
-    #     "NODES ",
-    #     "REASON ",
-    #     "NODES(A/I/O/T) ",
-    #     "TIMESTAMP ",
-    #     "PRIO_JOB_FACTOR ",
-    #     "DEFAULTTIME ",
-    #     "PREEMPT_MODE ",
-    #     "NODELIST ",
-    #     "PARTITION .1",
-    #     "ALLOCNODES ",
-    #     "USER ",
-    #     "CLUSTER ",
-    #     "SOCKETS ",
-    #     "CORES ",
-    #     "THREADS ",
-    # ], axis=1)
-
-    node_data["CPUS Allocated"] = node_data['CPUS(A/I/O/T) '].apply(lambda x: int(x.split('/')[0]))
-    node_data["CPUS Idle"] = node_data['CPUS(A/I/O/T) '].apply(lambda x: int(x.split('/')[1]))
-    node_data["CPUS Total"] = node_data['CPUS(A/I/O/T) '].apply(lambda x: int(x.split('/')[3]))
-    node_data = node_data.drop(['CPUS(A/I/O/T) '], axis=1)
+def create_partition_summary(node_data: DataFrame, human_readable: bool = True) -> dict:
+    result_dict = {}
+    node_data["CPUS Allocated"] = node_data['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[0]))
+    node_data["CPUS Idle"] = node_data['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[1]))
+    node_data["CPUS Total"] = node_data['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[3]))
+    node_data = node_data.drop(['CPUS(A/I/O/T)'], axis=1)
 #    print(node_data['CPUS Allocated'])
-    node_data["CPUS Load / Allocated"] = node_data['CPU_LOAD '].divide(node_data['CPUS Allocated'])
+    node_data["CPUS Load / Allocated"] = node_data['CPU_LOAD'].divide(node_data['CPUS Allocated'])
 
-    node_data_grouped = node_data.groupby(['PARTITION '])
+    node_data_grouped = node_data.groupby(['PARTITION'])
     node_data_aggregated = node_data_grouped.agg({
         'FREE_MEM': ['sum'],
         'MEMORY': ['sum'],
         'CPUS': ['sum'],
-        'CPU_LOAD ': ['sum'],
+        'CPU_LOAD': ['sum'],
         'CPUS Allocated': ['sum'],
         'CPUS Idle': ['sum'],
     })
 
-    node_data_aggregated['CPUS Load / Allocated'] = node_data_aggregated['CPU_LOAD ', 'sum'].div(
+    node_data_aggregated['CPUS Load / Allocated'] = node_data_aggregated['CPU_LOAD', 'sum'].div(
         node_data_aggregated['CPUS Allocated', 'sum'],
     )
+    node_data_aggregated['ALLOCATED_MEM'] = node_data_aggregated['MEMORY', 'sum'] - node_data_aggregated['FREE_MEM', 'sum']
     node_data_aggregated['FREE_MEM', 'sum'] = node_data_aggregated['FREE_MEM', 'sum'].apply(
-        lambda x: f'{x / 1024:.0f} GiB',
+        lambda x: int(x * (1024**2)),
     )
-    node_data_aggregated['MEMORY', 'sum'] = node_data_aggregated['MEMORY', 'sum'].apply(lambda x: f'{x / 1024:.0f} GiB')
+    node_data_aggregated['MEMORY', 'sum'] = node_data_aggregated['MEMORY', 'sum'].apply(lambda x: int(x * (1024**2)))
     node_data_aggregated.columns = node_data_aggregated.columns.get_level_values(0)
 
-    return node_data_aggregated
+    memory_dataframe = node_data_aggregated[['MEMORY', 'FREE_MEM', 'ALLOCATED_MEM']].copy()
+    if human_readable:
+        pass
+    else:
+        memory_dataframe.rename(
+            columns={
+                'MEMORY': 'total',
+                'FREE_MEM': 'free',
+            },
+            inplace=True,
+        )
+
+    result_dict['memory_total_bytes'] = memory_dataframe
+
+    return result_dict
 

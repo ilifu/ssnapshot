@@ -154,16 +154,19 @@ def generate_prometheus(output: dict) -> str:
     lines = []
     timestamp = output.get('header', {}).get('time')
     if not timestamp:
-        timestamp=datetime.now()
+        timestamp = datetime.now()
     for key, value in output.items():
         output_type = value.get('type')
-        if output_type == 'table':
+        if output_type == 'dataframe':
             table_name = key.lower().replace(' ', '_')
-            table = value.get('value')
-            for row_index, row in table.iterrows():
-                for column_number, column in enumerate(table.columns):
+            dataframe = value.get('dataframe')
+            index_name = dataframe.index.name.lower().replace(' ', '_')
+            for row_index, row in dataframe.iterrows():
+                for column_number, column in enumerate(dataframe.columns):
                     column_name = column.lower().replace(' ', '_')
-                    lines.append(f'ssnapshot_{table_name}_{column_name}{{label="{row_index}"}} {row[column_number]} {timestamp.timestamp()}')
+                    lines.append(
+                        f'ssnapshot_{table_name}{{{index_name}="{row_index}" label="{column_name}" }} '
+                        f'{row[column_number]} {int(timestamp.timestamp()*1000)}')
     return '\n'.join(lines)
 
 
@@ -209,11 +212,12 @@ def main():
 
     if "partitions" in args.tables:
         sinfo = get_sinfo()
-        partitions = create_partition_summary(sinfo)
-        output['Partition Summary'] = {
-            'type': 'table',
-            'value': partitions,
-        }
+        partitions = create_partition_summary(sinfo, args.human_readable)
+        for table_name, data in partitions.items():
+            output[table_name] = {
+                'type': 'dataframe',
+                'dataframe': data,
+            }
 
     if args.output == 'markdown':
         print(generate_markdown(output))
