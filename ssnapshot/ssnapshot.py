@@ -7,10 +7,12 @@ import re
 from subprocess import PIPE, run
 from typing import Tuple, List
 
+from cachetools import cached, LRUCache, TTLCache
 from humanize import naturalsize, naturaldelta
 from pandas import DataFrame, read_csv
 
 
+@cached(cache=LRUCache(maxsize=512))
 def dhhmmss_to_seconds(dhhmmss: str) -> int:
     days = 0
     try:
@@ -29,10 +31,12 @@ def dhhmmss_to_seconds(dhhmmss: str) -> int:
     return 0
 
 
+@cached(cache=LRUCache(maxsize=512))
 def seconds_to_hhmmss(seconds: int) -> str:
     return str(timedelta(seconds=int(seconds)))
 
 
+@cached(cache=LRUCache(maxsize=512))
 def expand_compressed_slurm_nodelist(node_list) -> tuple:
     logging.debug(f'Expanding node list: { node_list }')
     if node_list == "None assigned" or node_list == '(null)' or node_list is None:
@@ -69,6 +73,7 @@ def run_command(command: str, parameters: list) -> Tuple[int, str, str]:
     return cmd.returncode, cmd.stdout.strip(), cmd.stderr.strip()
 
 
+@cached(cache=TTLCache(maxsize=512, ttl=60))
 def get_squeue() -> DataFrame:
     exit_status, stdout, stderr = run_command('squeue', ['-a', '--format=%all'])
     squeue_data = read_csv(StringIO(stdout), sep='|')
@@ -117,7 +122,7 @@ def get_squeue() -> DataFrame:
         squeue_data[f'{column}_SECONDS'] = squeue_data[column].apply(dhhmmss_to_seconds)
     return squeue_data
 
-
+@cached(cache=TTLCache(maxsize=512, ttl=60))
 def get_sinfo() -> DataFrame:
     # exit_status, stdout, stderr = run_command('sinfo', ['-N', '--format=%all'])
     exit_status, stdout, stderr = run_command('sinfo', ['-N', '--format="%n|%e|%C|%m|%O|%R|%c"'])
@@ -126,7 +131,8 @@ def get_sinfo() -> DataFrame:
         sep='|',
         dtype={
             'CPU_LOAD': 'Float64',
-            'CPUS': 'Int32'
+            'CPUS': 'Int32',
+            'FREE_MEM': 'Int32',
         }
     )
     # sinfo_data['CPU_LOAD'] = to_numeric(sinfo_data['CPU_LOAD'], errors='coerce')
@@ -134,7 +140,7 @@ def get_sinfo() -> DataFrame:
 
     return sinfo_data
 
-
+@cached(cache=TTLCache(maxsize=512, ttl=60))
 def get_sstat(squeue_data: DataFrame, users: list) -> DataFrame:
     running_jobs = squeue_data[squeue_data['STATE'] == 'RUNNING']
     if users != ['ALL']:
@@ -246,48 +252,66 @@ def create_job_detail_summary(job_detail: DataFrame, human_readable=True) -> Dat
     return job_detail
 
 
-def create_partition_summary(node_data: DataFrame, human_readable: bool = True) -> dict:
-    result_dict = {}
-    node_data["CPUS Allocated"] = node_data['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[0]))
-    node_data["CPUS Idle"] = node_data['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[1]))
-    node_data["CPUS Total"] = node_data['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[3]))
-    node_data = node_data.drop(['CPUS(A/I/O/T)'], axis=1)
-#    print(node_data['CPUS Allocated'])
-    node_data["CPUS Load / Allocated"] = node_data['CPU_LOAD'].divide(node_data['CPUS Allocated'])
-
-    node_data_grouped = node_data.groupby(['PARTITION'])
-    node_data_aggregated = node_data_grouped.agg({
+def create_partition_memory_summary(human_readable: bool = True) -> dict:
+    sinfo_mem = get_sinfo().groupby(['PARTITION']).agg({
         'FREE_MEM': ['sum'],
         'MEMORY': ['sum'],
-        'CPUS': ['sum'],
-        'CPU_LOAD': ['sum'],
-        'CPUS Allocated': ['sum'],
-        'CPUS Idle': ['sum'],
     })
+    sinfo_mem.columns = sinfo_mem.columns.get_level_values(0)
 
-    node_data_aggregated['CPUS Load / Allocated'] = node_data_aggregated['CPU_LOAD', 'sum'].div(
-        node_data_aggregated['CPUS Allocated', 'sum'],
-    )
-    node_data_aggregated['ALLOCATED_MEM'] = node_data_aggregated['MEMORY', 'sum'] - node_data_aggregated['FREE_MEM', 'sum']
-    node_data_aggregated['FREE_MEM', 'sum'] = node_data_aggregated['FREE_MEM', 'sum'].apply(
-        lambda x: int(x * (1024**2)),
-    )
-    node_data_aggregated['MEMORY', 'sum'] = node_data_aggregated['MEMORY', 'sum'].apply(lambda x: int(x * (1024**2)))
-    node_data_aggregated.columns = node_data_aggregated.columns.get_level_values(0)
+    sinfo_mem['FREE_MEM'] = sinfo_mem['FREE_MEM'].apply(lambda x: int(x * (1024 ** 2)))
+    sinfo_mem['MEMORY'] = sinfo_mem['MEMORY'].apply(lambda x: int(x * (1024 ** 2)))
+    sinfo_mem['FREE_MEM'] = sinfo_mem[['FREE_MEM', 'MEMORY']].min(axis=1)
+    sinfo_mem['ALLOCATED_MEM'] = sinfo_mem['MEMORY'] - sinfo_mem['FREE_MEM']
 
-    memory_dataframe = node_data_aggregated[['MEMORY', 'FREE_MEM', 'ALLOCATED_MEM']].copy()
     if human_readable:
         pass
     else:
-        memory_dataframe.rename(
+        sinfo_mem.rename(
             columns={
                 'MEMORY': 'total',
                 'FREE_MEM': 'free',
+                'ALLOCATED_MEM': 'allocated',
             },
             inplace=True,
         )
+    return {'memory_total_bytes': sinfo_mem}
 
-    result_dict['memory_total_bytes'] = memory_dataframe
 
-    return result_dict
+def create_partition_cpu_count_summary(human_readable: bool = True) -> dict:
+    sinfo_cpu = get_sinfo()
+    sinfo_cpu['allocated'] = sinfo_cpu['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[0]))
+    sinfo_cpu['idle'] = sinfo_cpu['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[1]))
+    sinfo_cpu['offline'] = sinfo_cpu['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[2]))
+    sinfo_cpu['total'] = sinfo_cpu['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[3]))
+
+    sinfo_cpu = sinfo_cpu.groupby(['PARTITION']).agg({
+        'allocated': ['sum'],
+        'idle': ['sum'],
+        'offline': ['sum'],
+        'total': ['sum'],
+    })
+    sinfo_cpu.columns = sinfo_cpu.columns.get_level_values(0)
+    return {'cpu_state_count': sinfo_cpu}
+
+
+def create_partition_cpu_load_summary(human_readable: bool = True) -> dict:
+    sinfo_cpu = get_sinfo()
+    sinfo_cpu["allocated"] = sinfo_cpu['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[0]))
+
+    sinfo_cpu = sinfo_cpu.groupby(['PARTITION']).agg({
+        'CPU_LOAD': ['sum'],
+        'allocated': ['sum'],
+    })
+    sinfo_cpu.columns = sinfo_cpu.columns.get_level_values(0)
+
+    sinfo_cpu['load / allocated'] = sinfo_cpu['CPU_LOAD'].div(sinfo_cpu['allocated'])
+    sinfo_cpu.rename(
+        columns={
+            'CPU_LOAD': 'load',
+        },
+        inplace=True,
+    )
+
+    return {'cpu_load': sinfo_cpu}
 
