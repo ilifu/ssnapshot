@@ -11,7 +11,9 @@ from coloredlogs import install as coloredlogs_install
 from ssnapshot.ssnapshot import (
     create_job_summaries,
     create_job_detail_summary,
-    create_partition_summary,
+    create_partition_memory_summary,
+    create_partition_cpu_count_summary,
+    create_partition_cpu_load_summary,
     get_sinfo,
     get_squeue,
     get_sstat,
@@ -145,8 +147,12 @@ def generate_html(output: dict) -> str:
 def generate_json(output: dict) -> str:
     for key, value in output.items():
         value_type = value.get('type')
-        if value_type == 'table':
-            value['value'] = value.get('value').to_dict()
+        if key == 'header':
+            timestamp = value.get('time')
+            if timestamp:
+                output['header']['time'] = str(timestamp)
+        if value_type == 'dataframe':
+            value['dataframe'] = value.get('dataframe').to_dict()
     return dumps(output, indent=2)
 
 
@@ -163,9 +169,9 @@ def generate_prometheus(output: dict) -> str:
             index_name = dataframe.index.name.lower().replace(' ', '_')
             for row_index, row in dataframe.iterrows():
                 for column_number, column in enumerate(dataframe.columns):
-                    column_name = column.lower().replace(' ', '_')
+                    column_name = column.lower().replace(' ', '_').replace('/', 'per')
                     lines.append(
-                        f'ssnapshot_{table_name}{{{index_name}="{row_index}" label="{column_name}" }} '
+                        f'ssnapshot_{table_name}{{{index_name}="{row_index}" label="{column_name}"}} '
                         f'{row[column_number]} {int(timestamp.timestamp()*1000)}')
     return '\n'.join(lines)
 
@@ -211,13 +217,16 @@ def main():
 #            print(squeue.merge(job_detail, left_on='JOBID.1', right_on='JobID'))
 
     if "partitions" in args.tables:
-        sinfo = get_sinfo()
-        partitions = create_partition_summary(sinfo, args.human_readable)
-        for table_name, data in partitions.items():
-            output[table_name] = {
-                'type': 'dataframe',
-                'dataframe': data,
-            }
+        partition_mem = create_partition_memory_summary(args.human_readable)
+        partition_cpu = create_partition_cpu_count_summary(args.human_readable)
+        partition_load = create_partition_cpu_load_summary(args.human_readable)
+
+        for info in [partition_mem, partition_cpu, partition_load]:
+            for table_name, data in info.items():
+                output[table_name] = {
+                    'type': 'dataframe',
+                    'dataframe': data,
+                }
 
     if args.output == 'markdown':
         print(generate_markdown(output))
