@@ -18,6 +18,7 @@ pandas = "*"
 tabulate = "*"
 jinja2 = "*"
 humanize = "*"
+cachetools = "*"
 
 [requires]
 python_version = "3.8"
