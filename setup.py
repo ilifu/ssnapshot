@@ -14,6 +14,7 @@ setuptools.setup(
     url='https://github.com/ilifu/ssnapshot',
     packages=setuptools.find_packages(),
     install_requires=[
+        'cachetools',
         'coloredlogs',
         'humanize',
         'pandas',
