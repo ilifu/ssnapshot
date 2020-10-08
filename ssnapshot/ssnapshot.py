@@ -1,15 +1,17 @@
-#!/usr/bin/env python3
-
 from datetime import timedelta
 import logging
 from io import StringIO
 import re
 from subprocess import PIPE, run
-from typing import Tuple, List
+from typing import Tuple
 
 from cachetools import cached, LRUCache, TTLCache
 from humanize import naturalsize, naturaldelta
 from pandas import DataFrame, read_csv
+
+squeue_ttl_cache = TTLCache(maxsize=8, ttl=60)
+sinfo_ttl_cache = TTLCache(maxsize=8, ttl=60)
+sstat_ttl_cache = TTLCache(maxsize=8, ttl=60)
 
 
 @cached(cache=LRUCache(maxsize=512))
@@ -73,58 +75,19 @@ def run_command(command: str, parameters: list) -> Tuple[int, str, str]:
     return cmd.returncode, cmd.stdout.strip(), cmd.stderr.strip()
 
 
-@cached(cache=TTLCache(maxsize=512, ttl=60))
+@cached(cache=squeue_ttl_cache)
 def get_squeue() -> DataFrame:
-    exit_status, stdout, stderr = run_command('squeue', ['-a', '--format=%all'])
+    exit_status, stdout, stderr = run_command('squeue', ['-a', '--format="%u|%a|%A|%C|%D|%L|%M|%N|%T|%U"'])
     squeue_data = read_csv(StringIO(stdout), sep='|')
     logging.debug(f'squeue output: { squeue_data }')
-    squeue_data = squeue_data.drop([
-        'TRES_PER_NODE',
-        'MIN_CPUS',
-        'MIN_TMP_DISK',
-        'FEATURES',
-        'GROUP',
-        'OVER_SUBSCRIBE',
-        'COMMENT',
-        'REQ_NODES',
-        'COMMAND',
-        'PRIORITY',
-        'QOS',
-        'REASON',
-        'Unnamed: 18',
-        'ST',
-        'RESERVATION',
-        'WCKEY',
-        'EXC_NODES',
-        'NODELIST(REASON)',
-        'NICE',
-        'S:C:T',
-        # 'JOBID.1',
-        'EXEC_HOST',
-        'DEPENDENCY',
-        'ARRAY_JOB_ID',
-        'GROUP.1',
-        'SOCKETS_PER_NODE',
-        'CORES_PER_SOCKET',
-        'THREADS_PER_CORE',
-        'ARRAY_TASK_ID',
-        'CONTIGUOUS',
-        'PARTITION',
-        'PRIORITY.1',
-        # 'STATE',
-        'LICENSES',
-        'CORE_SPEC',
-        'SCHEDNODES',
-        'WORK_DIR',
-        'NAME', 'SUBMIT_TIME', 'END_TIME', 'START_TIME', 'TIME_LIMIT',
-    ], axis=1)
     for column in ['TIME_LEFT', 'TIME']:
         squeue_data[f'{column}_SECONDS'] = squeue_data[column].apply(dhhmmss_to_seconds)
+    squeue_data.set_index('JOBID')
     return squeue_data
 
-@cached(cache=TTLCache(maxsize=512, ttl=60))
+
+@cached(cache=sinfo_ttl_cache)
 def get_sinfo() -> DataFrame:
-    # exit_status, stdout, stderr = run_command('sinfo', ['-N', '--format=%all'])
     exit_status, stdout, stderr = run_command('sinfo', ['-N', '--format="%n|%e|%C|%m|%O|%R|%c"'])
     sinfo_data = read_csv(
         StringIO(stdout),
@@ -135,12 +98,12 @@ def get_sinfo() -> DataFrame:
             'FREE_MEM': 'Int32',
         }
     )
-    # sinfo_data['CPU_LOAD'] = to_numeric(sinfo_data['CPU_LOAD'], errors='coerce')
     logging.debug(f'sinfo output: { sinfo_data }')
 
     return sinfo_data
 
-@cached(cache=TTLCache(maxsize=512, ttl=60))
+
+@cached(cache=sstat_ttl_cache)
 def get_sstat(squeue_data: DataFrame, users: list) -> DataFrame:
     running_jobs = squeue_data[squeue_data['STATE'] == 'RUNNING']
     if users != ['ALL']:
@@ -192,6 +155,11 @@ def create_job_summaries(squeue_data: DataFrame, human_readable: bool = True) ->
 
     running_jobs = aggregated_grouped.loc["RUNNING"]
     pending_jobs = aggregated_grouped.loc["PENDING"]
+
+    running_jobs.reset_index(inplace=True)
+    running_jobs.set_index('Account', inplace=True)
+    pending_jobs.reset_index(inplace=True)
+    pending_jobs.set_index('Account', inplace=True)
 
     return running_jobs, pending_jobs
 
@@ -253,7 +221,9 @@ def create_job_detail_summary(job_detail: DataFrame, human_readable=True) -> Dat
 
 
 def create_partition_memory_summary(human_readable: bool = True) -> dict:
-    sinfo_mem = get_sinfo().groupby(['PARTITION']).agg({
+    sinfo = get_sinfo()
+    logging.info(sinfo.columns)
+    sinfo_mem = sinfo.groupby(['PARTITION']).agg({
         'FREE_MEM': ['sum'],
         'MEMORY': ['sum'],
     })
