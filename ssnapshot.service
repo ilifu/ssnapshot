@@ -1,0 +1,10 @@
+[Unit]
+Description=ssnapshot is a service to create export slurm status information to the prometheus exporter
+
+[Service]
+ExecStart=/opt/ssnapshot/.venv/bin/ssnapshot -a -p --prometheus --daemonize --sleep 60 --outfile /var/lib/prometheus/node-exporter/ssnapshot.prom
+Type=simple
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
