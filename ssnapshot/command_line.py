@@ -253,6 +253,10 @@ def main():
             output_string = output_method(output)
 
         if output_string:
+            try:
+                args.outfile.truncate(0)
+            except OSError:  # expected for stdout
+                pass
             args.outfile.write(output_string)
 
         if args.daemonize:
