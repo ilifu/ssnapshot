@@ -78,7 +78,7 @@ def run_command(command: str, parameters: list) -> Tuple[int, str, str]:
 
 @cached(cache=squeue_ttl_cache)
 def get_squeue() -> DataFrame:
-    exit_status, stdout, stderr = run_command('squeue', ['-a', '--format="%u|%a|%A|%C|%D|%L|%M|%N|%T|%U"'])
+    exit_status, stdout, stderr = run_command('squeue', ['-a', '--format=%u|%a|%A|%C|%D|%L|%M|%N|%T|%U'])
     squeue_data = read_csv(
         StringIO(stdout),
         sep='|',
@@ -115,7 +115,7 @@ def megabytes_to_bytes_converter(megabytes: str) -> int:
 
 @cached(cache=sinfo_ttl_cache)
 def get_sinfo() -> DataFrame:
-    exit_status, stdout, stderr = run_command('sinfo', ['-N', '--format="%n|%e|%C|%m|%O|%R|%c"'])
+    exit_status, stdout, stderr = run_command('sinfo', ['-N', '--format=%n|%e|%C|%m|%O|%R|%c'])
     sinfo_data = read_csv(
         StringIO(stdout),
         sep='|',
