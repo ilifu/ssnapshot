@@ -3,11 +3,13 @@ import logging
 from io import StringIO
 import re
 from subprocess import PIPE, run
-from typing import Tuple
+from typing import List, Tuple
 
 from cachetools import cached, LRUCache, TTLCache
 from humanize import naturalsize, naturaldelta
-from pandas import DataFrame, read_csv
+
+
+from pandas import DataFrame, merge, read_csv
 
 squeue_ttl_cache = TTLCache(maxsize=8, ttl=60)
 sinfo_ttl_cache = TTLCache(maxsize=8, ttl=60)
@@ -38,12 +40,11 @@ def seconds_to_hhmmss(seconds: int) -> str:
     return str(timedelta(seconds=int(seconds)))
 
 
-@cached(cache=LRUCache(maxsize=512))
-def expand_compressed_slurm_nodelist(node_list) -> tuple:
-    logging.debug(f'Expanding node list: { node_list }')
-    if node_list == "None assigned" or node_list == '(null)' or node_list is None:
-        return ()
+@cached(cache=LRUCache(maxsize=1024))
+def node_list_string_to_list(node_list: str) -> List[str]:
     nodes = []
+    if node_list == "None assigned" or node_list == '(null)' or node_list is None:
+        return nodes
     groups = re.findall(r'[^,\[]+(?:\[[^\]]+\])?', node_list)
     for group in groups:
         if '[' not in group:
@@ -61,7 +62,7 @@ def expand_compressed_slurm_nodelist(node_list) -> tuple:
             zfill = len(node_range[0])
             for suffix in range(start, end + 1):
                 nodes.append(f'{prefix}{str(suffix).zfill(zfill)}')
-    return tuple(nodes)
+    return nodes
 
 
 def run_command(command: str, parameters: list) -> Tuple[int, str, str]:
@@ -78,12 +79,38 @@ def run_command(command: str, parameters: list) -> Tuple[int, str, str]:
 @cached(cache=squeue_ttl_cache)
 def get_squeue() -> DataFrame:
     exit_status, stdout, stderr = run_command('squeue', ['-a', '--format="%u|%a|%A|%C|%D|%L|%M|%N|%T|%U"'])
-    squeue_data = read_csv(StringIO(stdout), sep='|')
+    squeue_data = read_csv(
+        StringIO(stdout),
+        sep='|',
+        dtype={
+            'STATE': 'category',
+            'USER': 'category',
+            'ACCOUNT': 'category',
+            'JOBID': 'uint32',
+            'CPUS': 'uint32',
+            'NODES': 'uint16',
+            'UID': 'uint32',
+        },
+        converters={
+            'TIME': dhhmmss_to_seconds,
+            'TIME_LEFT': dhhmmss_to_seconds,
+            'NODELIST': node_list_string_to_list,
+        }
+
+    )
+
+    squeue_data['CPUTIME_LEFT_SECONDS'] = squeue_data['TIME_LEFT'] * squeue_data['CPUS']
+
     logging.debug(f'squeue output: { squeue_data }')
-    for column in ['TIME_LEFT', 'TIME']:
-        squeue_data[f'{column}_SECONDS'] = squeue_data[column].apply(dhhmmss_to_seconds)
-    squeue_data.set_index('JOBID')
     return squeue_data
+
+
+def megabytes_to_bytes_converter(megabytes: str) -> int:
+    try:
+        return int(megabytes) * (1024 ** 2)
+    except ValueError:
+        logging.debug(f'Could not convert "{megabytes}" to bytes unit integer')
+        return 0
 
 
 @cached(cache=sinfo_ttl_cache)
@@ -94,10 +121,25 @@ def get_sinfo() -> DataFrame:
         sep='|',
         dtype={
             'CPU_LOAD': 'Float64',
-            'CPUS': 'Int32',
-            'FREE_MEM': 'Int32',
+            'CPUS': 'uint16',
+            'PARTITION': 'category'
+        },
+        converters={
+            'FREE_MEM': megabytes_to_bytes_converter,
+            'MEMORY': megabytes_to_bytes_converter,
+
         }
     )
+    sinfo_data['FREE_MEM'] = sinfo_data[['FREE_MEM', 'MEMORY']].min(axis=1)
+    sinfo_data['ALLOCATED_MEM'] = sinfo_data['MEMORY'] - sinfo_data['FREE_MEM']
+
+    sinfo_data['allocated'] = sinfo_data['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[0]))
+    sinfo_data['idle'] = sinfo_data['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[1]))
+    sinfo_data['offline'] = sinfo_data['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[2]))
+    sinfo_data['total'] = sinfo_data['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[3]))
+
+    sinfo_data.drop(columns=['CPUS(A/I/O/T)'], inplace=True)
+
     logging.debug(f'sinfo output: { sinfo_data }')
 
     return sinfo_data
@@ -125,30 +167,24 @@ def grouped(iterable, n=2):
     return zip(*[iter(iterable)]*n)
 
 
-def create_job_summaries(squeue_data: DataFrame, human_readable: bool = True) -> Tuple[DataFrame, DataFrame]:
+def create_job_summaries() -> Tuple[DataFrame, DataFrame]:
+    squeue_data = get_squeue().copy()
+    squeue_grouped = squeue_data.groupby(['ACCOUNT', 'STATE'])  # , 'USER'])
 
-    squeue_data['CPUTIME_LEFT_SECONDS'] = squeue_data['TIME_LEFT_SECONDS'] * squeue_data['CPUS']
-
-    squeue_grouped = squeue_data.groupby(['STATE', 'ACCOUNT'])  # , 'USER'])
     aggregated_grouped = squeue_grouped.agg({
         'CPUS': ['sum'],
         'CPUTIME_LEFT_SECONDS': ['sum'],
-    }).sort_values(['STATE', ('CPUTIME_LEFT_SECONDS', 'sum')], ascending=False)
+    })  # .sort_values(['STATE', ('CPUTIME_LEFT_SECONDS', 'sum')], ascending=False)
 
-    if human_readable:
-        aggregated_grouped['CPUTIME_LEFT_SECONDS', 'HR'] = aggregated_grouped['CPUTIME_LEFT_SECONDS', 'sum'].apply(
-            seconds_to_hhmmss,
-        )
-        del aggregated_grouped[('CPUTIME_LEFT_SECONDS', 'sum')]
-        aggregated_grouped.rename(
-            columns={'CPUS': 'CPUs', 'CPUTIME_LEFT_SECONDS': 'CPU time remaining'},
-            inplace=True,
-        )
-    else:
-        aggregated_grouped.rename(
-            columns={'CPUS': 'cpus_total', 'CPUTIME_LEFT_SECONDS': 'cputime_remaining_seconds_total'},
-            inplace=True,
-        )
+    # aggregated_grouped.dropna(inplace=True)
+    aggregated_grouped.fillna(value=0, inplace=True)
+
+    logging.debug(aggregated_grouped.to_markdown())
+
+    aggregated_grouped.rename(
+        columns={'CPUS': 'cpus_total', 'CPUTIME_LEFT_SECONDS': 'cputime_remaining_seconds_total'},
+        inplace=True,
+    )
 
     aggregated_grouped.columns = aggregated_grouped.columns.get_level_values(0)
     aggregated_grouped.index.names = ['State', 'Account']
@@ -162,6 +198,34 @@ def create_job_summaries(squeue_data: DataFrame, human_readable: bool = True) ->
     pending_jobs.set_index('Account', inplace=True)
 
     return running_jobs, pending_jobs
+
+
+def create_account_cpu_usage_summary() -> dict:
+    squeue_data = get_squeue().copy()
+
+    final_dataframe = squeue_data.pivot_table(
+        index='ACCOUNT',
+        columns='STATE',
+        values='CPUS',
+        aggfunc=sum,
+    )
+    final_dataframe.fillna(0, inplace=True)
+    logging.debug(final_dataframe.to_markdown())
+    return {'account_cpu_usage_total': final_dataframe}
+
+
+def create_account_cputime_remaining_summary() -> dict:
+    squeue_data = get_squeue().copy()
+
+    final_dataframe = squeue_data.pivot_table(
+        index='ACCOUNT',
+        columns='STATE',
+        values='CPUTIME_LEFT_SECONDS',
+        aggfunc=sum,
+    )
+    final_dataframe.fillna(0, inplace=True)
+    logging.debug(final_dataframe.to_markdown())
+    return {'account_cputime_remaining_total_seconds': final_dataframe}
 
 
 def create_job_detail_summary(job_detail: DataFrame, human_readable=True) -> DataFrame:
@@ -221,7 +285,7 @@ def create_job_detail_summary(job_detail: DataFrame, human_readable=True) -> Dat
 
 
 def create_partition_memory_summary(human_readable: bool = True) -> dict:
-    sinfo = get_sinfo()
+    sinfo = get_sinfo().copy()
     logging.info(sinfo.columns)
     sinfo_mem = sinfo.groupby(['PARTITION']).agg({
         'FREE_MEM': ['sum'],
@@ -229,10 +293,10 @@ def create_partition_memory_summary(human_readable: bool = True) -> dict:
     })
     sinfo_mem.columns = sinfo_mem.columns.get_level_values(0)
 
-    sinfo_mem['FREE_MEM'] = sinfo_mem['FREE_MEM'].apply(lambda x: int(x * (1024 ** 2)))
-    sinfo_mem['MEMORY'] = sinfo_mem['MEMORY'].apply(lambda x: int(x * (1024 ** 2)))
-    sinfo_mem['FREE_MEM'] = sinfo_mem[['FREE_MEM', 'MEMORY']].min(axis=1)
-    sinfo_mem['ALLOCATED_MEM'] = sinfo_mem['MEMORY'] - sinfo_mem['FREE_MEM']
+    # sinfo_mem['FREE_MEM'] = sinfo_mem['FREE_MEM'].apply(lambda x: int(x * (1024 ** 2)))
+    # sinfo_mem['MEMORY'] = sinfo_mem['MEMORY'].apply(lambda x: int(x * (1024 ** 2)))
+    # sinfo_mem['FREE_MEM'] = sinfo_mem[['FREE_MEM', 'MEMORY']].min(axis=1)
+    # sinfo_mem['ALLOCATED_MEM'] = sinfo_mem['MEMORY'] - sinfo_mem['FREE_MEM']
 
     if human_readable:
         pass
@@ -249,11 +313,11 @@ def create_partition_memory_summary(human_readable: bool = True) -> dict:
 
 
 def create_partition_cpu_count_summary(human_readable: bool = True) -> dict:
-    sinfo_cpu = get_sinfo()
-    sinfo_cpu['allocated'] = sinfo_cpu['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[0]))
-    sinfo_cpu['idle'] = sinfo_cpu['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[1]))
-    sinfo_cpu['offline'] = sinfo_cpu['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[2]))
-    sinfo_cpu['total'] = sinfo_cpu['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[3]))
+    sinfo_cpu = get_sinfo().copy()
+    # sinfo_cpu['allocated'] = sinfo_cpu['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[0]))
+    # sinfo_cpu['idle'] = sinfo_cpu['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[1]))
+    # sinfo_cpu['offline'] = sinfo_cpu['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[2]))
+    # sinfo_cpu['total'] = sinfo_cpu['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[3]))
 
     sinfo_cpu = sinfo_cpu.groupby(['PARTITION']).agg({
         'allocated': ['sum'],
@@ -266,8 +330,8 @@ def create_partition_cpu_count_summary(human_readable: bool = True) -> dict:
 
 
 def create_partition_cpu_load_summary(human_readable: bool = True) -> dict:
-    sinfo_cpu = get_sinfo()
-    sinfo_cpu["allocated"] = sinfo_cpu['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[0]))
+    sinfo_cpu = get_sinfo().copy()
+    # sinfo_cpu["allocated"] = sinfo_cpu['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[0]))
 
     sinfo_cpu = sinfo_cpu.groupby(['PARTITION']).agg({
         'CPU_LOAD': ['sum'],

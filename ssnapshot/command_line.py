@@ -11,13 +11,11 @@ from time import sleep
 from coloredlogs import install as coloredlogs_install
 
 from ssnapshot.ssnapshot import (
-    create_job_summaries,
-    create_job_detail_summary,
+    create_account_cpu_usage_summary,
+    create_account_cputime_remaining_summary,
     create_partition_memory_summary,
     create_partition_cpu_count_summary,
     create_partition_cpu_load_summary,
-    get_squeue,
-    get_sstat,
     sinfo_ttl_cache,
     squeue_ttl_cache,
     sstat_ttl_cache,
@@ -220,24 +218,33 @@ def main():
         output = OrderedDict([('header', {'value': 'Slurm Snapshot', 'time': datetime.now()})])
 
         if "jobs" in args.tables or args.job_detail:
-            squeue = get_squeue()
             if "jobs" in args.tables:
-                running, pending = create_job_summaries(squeue, args.human_readable)
-                output['Running Jobs'] = {
-                    'type': 'dataframe',
-                    'dataframe': running,
-                }
-                output['Pending Jobs'] = {
-                    'type': 'dataframe',
-                    'dataframe': pending,
-                }
+                account_cpu_usage = create_account_cpu_usage_summary()
+                account_cputime_remaining = create_account_cputime_remaining_summary()
+                for info in [account_cpu_usage, account_cputime_remaining]:
+                    for table_name, data in info.items():
+                        output[table_name] = {
+                            'type': 'dataframe',
+                            'dataframe': data,
+                        }
+
+                # running, pending = create_job_summaries()
+                # output['Running Jobs'] = {
+                #     'type': 'dataframe',
+                #     'dataframe': running,
+                # }
+                # output['Pending Jobs'] = {
+                #     'type': 'dataframe',
+                #     'dataframe': pending,
+                # }
             if args.job_detail:
-                job_detail = get_sstat(squeue, args.job_detail.split(','))
-                job_detail_summary = create_job_detail_summary(job_detail)
-                output['Job Detail'] = {
-                    'type': 'table',
-                    'value': job_detail_summary,
-                }
+                raise NotImplementedError
+                # job_detail = get_sstat(squeue, args.job_detail.split(','))
+                # job_detail_summary = create_job_detail_summary(job_detail)
+                # output['Job Detail'] = {
+                #     'type': 'table',
+                #     'value': job_detail_summary,
+                # }
 
         if "partitions" in args.tables:
             partition_mem = create_partition_memory_summary(args.human_readable)
