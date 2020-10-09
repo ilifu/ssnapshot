@@ -191,8 +191,8 @@ def generate_prometheus(output: dict) -> str:
                 for column_number, column in enumerate(dataframe.columns):
                     column_name = column.lower().replace(' ', '_').replace('/', 'per')
                     lines.append(
-                        f'ssnapshot_{table_name}{{{index_name}="{row_index}" label="{column_name}"}} '
-                        f'{row[column_number]} {int(timestamp.timestamp()*1000)}')
+                        f'ssnapshot_{table_name}{{{index_name}="{row_index}", label="{column_name}"}} '
+                        f'{row[column_number]}')
     return '\n'.join(lines) + '\n'
 
 
