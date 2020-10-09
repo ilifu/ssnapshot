@@ -52,19 +52,19 @@ def create_arg_parser() -> ArgumentParser:
         help='Where to write output. Default is stdout',
     )
 
-    human_readable_parser = new_parser.add_mutually_exclusive_group(required=False)
-    human_readable_parser.add_argument(
-        '--human-readable',
-        dest='human_readable',
-        action='store_true',
-        help='output is easily human readable. (Default)',
-    )
-    human_readable_parser.add_argument(
-        '--no-human-readable',
-        dest='human_readable',
-        action='store_false',
-        help='output is machine readable.',
-    )
+    # human_readable_parser = new_parser.add_mutually_exclusive_group(required=False)
+    # human_readable_parser.add_argument(
+    #     '--human-readable',
+    #     dest='human_readable',
+    #     action='store_true',
+    #     help='output is easily human readable. (Default)',
+    # )
+    # human_readable_parser.add_argument(
+    #     '--no-human-readable',
+    #     dest='human_readable',
+    #     action='store_false',
+    #     help='output is machine readable.',
+    # )
 
     new_parser.add_argument(
         '--jobs', '-j',
@@ -209,6 +209,14 @@ def main():
     if args.verbose >= 3:
         coloredlogs_install(level='DEBUG')
 
+    output_method = {
+        'html': generate_html,
+        'json': generate_json,
+        'markdown': generate_markdown,
+        'prometheus': generate_prometheus,
+
+    }.get(args.output)
+
     if args.output == 'prometheus':
         args.human_readable = False
 
@@ -228,15 +236,6 @@ def main():
                             'dataframe': data,
                         }
 
-                # running, pending = create_job_summaries()
-                # output['Running Jobs'] = {
-                #     'type': 'dataframe',
-                #     'dataframe': running,
-                # }
-                # output['Pending Jobs'] = {
-                #     'type': 'dataframe',
-                #     'dataframe': pending,
-                # }
             if args.job_detail:
                 raise NotImplementedError
                 # job_detail = get_sstat(squeue, args.job_detail.split(','))
@@ -260,17 +259,8 @@ def main():
 
         output_string = ''
 
-        if args.output == 'markdown':
-            output_string = generate_markdown(output)
-
-        if args.output == 'json':
-            output_string = generate_json(output)
-
-        if args.output == 'html':
-            output_string = generate_html(output)
-
-        if args.output == 'prometheus':
-            output_string = generate_prometheus(output)
+        if output_method:
+            output_string = output_method(output)
 
         if output_string:
             args.outfile.write(output_string)
