@@ -67,23 +67,23 @@ def create_arg_parser() -> ArgumentParser:
     # )
 
     new_parser.add_argument(
-        '--jobs', '-j',
+        '--accounts', '-a',
         dest='tables',
         action='append_const',
-        const='jobs',
-        help='Show running / pending job summary information. (Default: False)',
+        const='accounts',
+        help='Show account summary information. (Default: False)',
     )
-    new_parser.add_argument(
-        '--job-detail',
-        nargs='?',
-        metavar='user,...',
-        default=False,
-        const=getuser(),
-        help=(
-            'Show job details. Requires elevated privileges to get information from other users\' jobs. '
-            'Use "ALL" to view all users jobs. (Default: False)'
-        ),
-    )
+    # new_parser.add_argument(
+    #     '--job-detail',
+    #     nargs='?',
+    #     metavar='user,...',
+    #     default=False,
+    #     const=getuser(),
+    #     help=(
+    #         'Show job details. Requires elevated privileges to get information from other users\' jobs. '
+    #         'Use "ALL" to view all users jobs. (Default: False)'
+    #     ),
+    # )
     new_parser.add_argument(
         '--partitions', '-p',
         dest='tables',
@@ -141,8 +141,8 @@ def generate_markdown(output: dict) -> str:
         lines.append(f'# {title}{time}')
     for name, value in output.items():
         output_type = value.get('type')
-        if output_type == 'table':
-            table_md = value.get('value').to_markdown()
+        if output_type == 'dataframe':
+            table_md = value.get('dataframe').to_markdown()
             lines.append(f'## {name}\n{table_md}\n\n')
     return '\n'.join(lines)
 
@@ -158,8 +158,8 @@ def generate_html(output: dict) -> str:
         lines.append(f'<h1>{title}{time}</h1>')
     for name, value in output.items():
         output_type = value.get('type')
-        if output_type == 'table':
-            table_html = value.get('value').to_html()
+        if output_type == 'dataframe':
+            table_html = value.get('dataframe').to_html()
             lines.append(f'<h2>{name}</h2>\n{table_html}\n')
     return '\n'.join(lines)
 
@@ -225,25 +225,15 @@ def main():
             cache.clear()
         output = OrderedDict([('header', {'value': 'Slurm Snapshot', 'time': datetime.now()})])
 
-        if "jobs" in args.tables or args.job_detail:
-            if "jobs" in args.tables:
-                account_cpu_usage = create_account_cpu_usage_summary()
-                account_cputime_remaining = create_account_cputime_remaining_summary()
-                for info in [account_cpu_usage, account_cputime_remaining]:
-                    for table_name, data in info.items():
-                        output[table_name] = {
-                            'type': 'dataframe',
-                            'dataframe': data,
-                        }
-
-            if args.job_detail:
-                raise NotImplementedError
-                # job_detail = get_sstat(squeue, args.job_detail.split(','))
-                # job_detail_summary = create_job_detail_summary(job_detail)
-                # output['Job Detail'] = {
-                #     'type': 'table',
-                #     'value': job_detail_summary,
-                # }
+        if "accounts" in args.tables:
+            account_cpu_usage = create_account_cpu_usage_summary()
+            account_cputime_remaining = create_account_cputime_remaining_summary()
+            for info in [account_cpu_usage, account_cputime_remaining]:
+                for table_name, data in info.items():
+                    output[table_name] = {
+                        'type': 'dataframe',
+                        'dataframe': data,
+                    }
 
         if "partitions" in args.tables:
             partition_mem = create_partition_memory_summary(args.human_readable)
