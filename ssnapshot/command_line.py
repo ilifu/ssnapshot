@@ -141,7 +141,7 @@ def generate_markdown(output: dict) -> str:
     for name, value in output.items():
         output_type = value.get('type')
         if output_type == 'dataframe':
-            table_md = value.get('dataframe').to_markdown()
+            table_md = value.get('dataframe').reset_index().to_markdown(index=False, floatfmt="0.4f")
             lines.append(f'## {name}\n{table_md}\n\n')
     return '\n'.join(lines)
 
@@ -158,7 +158,7 @@ def generate_html(output: dict) -> str:
     for name, value in output.items():
         output_type = value.get('type')
         if output_type == 'dataframe':
-            table_html = value.get('dataframe').to_html()
+            table_html = value.get('dataframe').reset_index().to_html(index=False)
             lines.append(f'<h2>{name}</h2>\n{table_html}\n')
     return '\n'.join(lines)
 

@@ -398,8 +398,8 @@ def create_fairshare_summaries() -> dict:
 
     return {
         'account_fairshare_rawusage_seconds_total': fairshare['RawUsage'].to_frame(),
-        'account_fairshare_normusage_total': fairshare['NormUsage'].to_frame(),
-        'account_fairshare_levelfs_total': fairshare['LevelFS'].replace(np.inf, np.nan).dropna().to_frame(),
-        'account_fairshare_rawshares_total': fairshare['RawShares'].to_frame(),
-        'account_fairshare_normushares_total': fairshare['NormShares'].to_frame(),
+        'account_fairshare_normusage': fairshare['NormUsage'].to_frame(),
+        'account_fairshare_levelfs': fairshare['LevelFS'].replace(np.inf, np.nan).dropna().to_frame(),
+        'account_fairshare_rawshares': fairshare['RawShares'].to_frame(),
+        'account_fairshare_normshares': fairshare['NormShares'].to_frame(),
     }
