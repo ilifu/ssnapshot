@@ -171,7 +171,7 @@ def generate_json(output: dict) -> str:
             if timestamp:
                 output['header']['time'] = str(timestamp)
         if value_type == 'dataframe':
-            value['dataframe'] = value.get('dataframe').to_dict()
+            value['dataframe'] = value.get('dataframe').reset_index().to_dict()
     return dumps(output, indent=2)
 
 
