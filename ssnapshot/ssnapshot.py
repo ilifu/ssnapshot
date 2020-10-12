@@ -11,6 +11,7 @@ import numpy as np
 
 from pandas import DataFrame, merge, read_csv
 
+fairshare_ttl_cache = TTLCache(maxsize=8, ttl=60)
 squeue_ttl_cache = TTLCache(maxsize=8, ttl=60)
 sinfo_ttl_cache = TTLCache(maxsize=8, ttl=60)
 sstat_ttl_cache = TTLCache(maxsize=8, ttl=60)
@@ -105,7 +106,7 @@ def get_squeue() -> DataFrame:
     return squeue_data
 
 
-@cached(cache=squeue_ttl_cache)
+@cached(cache=fairshare_ttl_cache)
 def get_fairshare() -> DataFrame:
     exit_status, stdout, stderr = run_command('sshare', ['-a', '-l', '-P'])
     fairshare_data = read_csv(
