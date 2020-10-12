@@ -268,7 +268,13 @@ def main():
             output_string = output_method(output)
 
         if output_string:
+            try:
+                args.outfile.truncate(0)
+                args.outfile.seek(0, 0)
+            except OSError:  # expected for stdout
+                pass
             args.outfile.write(output_string)
+            args.outfile.flush()
 
         if args.daemonize:
             sleep(args.sleep)
