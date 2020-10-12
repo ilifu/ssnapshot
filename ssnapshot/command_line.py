@@ -197,7 +197,7 @@ def generate_prometheus(output: dict) -> str:
                     column_name = column.lower().replace(' ', '_').replace('/', 'per')
                     lines.append(
                         f'ssnapshot_{table_name}{{{label_string}, label="{column_name}"}} '
-                        f'{row[column_number]}')
+                        f'{row[column_number]:.6f}')
     return '\n'.join(lines) + '\n'
 
 
