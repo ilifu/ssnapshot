@@ -395,13 +395,13 @@ def create_fairshare_summaries() -> dict:
     fairshare = get_fairshare().copy()
 
     fairshare = fairshare[fairshare['RawShares'].notna()]
-    fairshare = fairshare[fairshare['RawUsage'] > 60*60*12]  # filter out usage less than 12 hours
+    fairshare = fairshare[fairshare['RawUsage'] > 60*60*24]  # filter out usage less than 24 hours
     logging.debug(fairshare)
 
     return {
-        'account_fairshare_rawusage_seconds_total': fairshare['RawUsage'].to_frame(),
-        'account_fairshare_normusage': fairshare['NormUsage'].to_frame(),
-        'account_fairshare_levelfs': fairshare['LevelFS'].replace(np.inf, np.nan).dropna().to_frame(),
-        'account_fairshare_rawshares': fairshare['RawShares'].to_frame(),
-        'account_fairshare_normshares': fairshare['NormShares'].to_frame(),
+        'fairshare_rawusage_seconds_total': fairshare['RawUsage'].to_frame(),
+        'fairshare_normusage': fairshare['NormUsage'].to_frame(),
+        'fairshare_levelfs': fairshare['LevelFS'].replace(np.inf, np.nan).dropna().to_frame(),
+        'fairshare_rawshares': fairshare['RawShares'].to_frame(),
+        'fairshare_normshares': fairshare['NormShares'].to_frame(),
     }
