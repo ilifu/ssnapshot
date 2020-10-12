@@ -395,6 +395,7 @@ def create_fairshare_summaries() -> dict:
     fairshare = get_fairshare().copy()
 
     fairshare = fairshare[fairshare['RawShares'].notna()]
+    fairshare = fairshare[fairshare['RawUsage'] > 60*60*12]  # filter out usage less than 12 hours
     logging.debug(fairshare)
 
     return {
