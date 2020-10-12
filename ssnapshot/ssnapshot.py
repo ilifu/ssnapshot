@@ -7,7 +7,7 @@ from typing import List, Tuple
 
 from cachetools import cached, LRUCache, TTLCache
 from humanize import naturalsize, naturaldelta
-
+import numpy as np
 
 from pandas import DataFrame, merge, read_csv
 
@@ -103,6 +103,46 @@ def get_squeue() -> DataFrame:
 
     logging.debug(f'squeue output: { squeue_data }')
     return squeue_data
+
+
+@cached(cache=squeue_ttl_cache)
+def get_fairshare() -> DataFrame:
+    exit_status, stdout, stderr = run_command('sshare', ['-a', '-l', '-P'])
+    fairshare_data = read_csv(
+        StringIO(stdout),
+        sep='|',
+        dtype={
+            #'User': 'category',
+            'RawShares': 'float32',
+            'NormShares': 'float64',
+            'RawUsage': 'uint64',
+            'NormUsage': 'float64',
+            'EffectvUsage': 'float64',
+            'FairShare': 'float64',
+            'LevelFS': 'float64',
+            # 'GrpTRESMins': 'category',
+            # 'TRESRunMins': 'category',
+        },
+        converters={
+            'Account': lambda x: x.strip(),
+            'User': lambda x: x.strip() if x != '' else '-',
+        },
+        usecols=[
+            'Account',
+            'User',
+            'RawShares',
+            'NormShares',
+            'RawUsage',
+            'NormUsage',
+            'EffectvUsage',
+            'FairShare',
+            'LevelFS',
+        ],
+        index_col=['Account', 'User'],
+    )
+
+    logging.debug(f'sshare output: {fairshare_data}')
+    return fairshare_data
 
 
 def megabytes_to_bytes_converter(megabytes: str) -> int:
@@ -349,3 +389,17 @@ def create_partition_cpu_load_summary(human_readable: bool = True) -> dict:
 
     return {'cpu_load': sinfo_cpu}
 
+
+def create_fairshare_summaries() -> dict:
+    fairshare = get_fairshare().copy()
+
+    fairshare = fairshare[fairshare['RawShares'].notna()]
+    logging.debug(fairshare)
+
+    return {
+        'account_fairshare_rawusage_seconds_total': fairshare['RawUsage'].to_frame(),
+        'account_fairshare_normusage_total': fairshare['NormUsage'].to_frame(),
+        'account_fairshare_levelfs_total': fairshare['LevelFS'].replace(np.inf, np.nan).dropna().to_frame(),
+        'account_fairshare_rawshares_total': fairshare['RawShares'].to_frame(),
+        'account_fairshare_normushares_total': fairshare['NormShares'].to_frame(),
+    }

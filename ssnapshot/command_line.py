@@ -4,6 +4,7 @@ from argparse import ArgumentParser, FileType
 from collections import OrderedDict
 from datetime import datetime
 from getpass import getuser
+import logging
 from json import dumps
 from sys import stdout
 from time import sleep
@@ -13,12 +14,14 @@ from coloredlogs import install as coloredlogs_install
 from ssnapshot.ssnapshot import (
     create_account_cpu_usage_summary,
     create_account_cputime_remaining_summary,
+    create_fairshare_summaries,
     create_partition_memory_summary,
     create_partition_cpu_count_summary,
     create_partition_cpu_load_summary,
     sinfo_ttl_cache,
     squeue_ttl_cache,
     sstat_ttl_cache,
+    get_fairshare,
 )
 
 
@@ -73,17 +76,13 @@ def create_arg_parser() -> ArgumentParser:
         const='accounts',
         help='Show account summary information. (Default: False)',
     )
-    # new_parser.add_argument(
-    #     '--job-detail',
-    #     nargs='?',
-    #     metavar='user,...',
-    #     default=False,
-    #     const=getuser(),
-    #     help=(
-    #         'Show job details. Requires elevated privileges to get information from other users\' jobs. '
-    #         'Use "ALL" to view all users jobs. (Default: False)'
-    #     ),
-    # )
+    new_parser.add_argument(
+        '--fairshare', '-f',
+        dest='tables',
+        action='append_const',
+        const='fairshare',
+        help='Show fairshare summary information',
+    )
     new_parser.add_argument(
         '--partitions', '-p',
         dest='tables',
@@ -186,12 +185,18 @@ def generate_prometheus(output: dict) -> str:
         if output_type == 'dataframe':
             table_name = key.lower().replace(' ', '_')
             dataframe = value.get('dataframe')
-            index_name = dataframe.index.name.lower().replace(' ', '_')
+            index_names = [name.lower().replace(' ', '_') for name in dataframe.index.names]
+            logging.debug('!!!!!!!!', dataframe)
             for row_index, row in dataframe.iterrows():
+                if type(row_index) != tuple:
+                    row_index = (row_index, )
+                logging.debug(row_index)
+                label_string = ", ".join(f'{index_name}="{row_index[counter]}"' for counter, index_name in enumerate(index_names))
+                logging.debug(label_string)
                 for column_number, column in enumerate(dataframe.columns):
                     column_name = column.lower().replace(' ', '_').replace('/', 'per')
                     lines.append(
-                        f'ssnapshot_{table_name}{{{index_name}="{row_index}", label="{column_name}"}} '
+                        f'ssnapshot_{table_name}{{{label_string}, label="{column_name}"}} '
                         f'{row[column_number]}')
     return '\n'.join(lines) + '\n'
 
@@ -241,6 +246,16 @@ def main():
             partition_load = create_partition_cpu_load_summary(args.human_readable)
 
             for info in [partition_mem, partition_cpu, partition_load]:
+                for table_name, data in info.items():
+                    output[table_name] = {
+                        'type': 'dataframe',
+                        'dataframe': data,
+                    }
+
+        if "fairshare" in args.tables:
+            fairshare_account_summary = create_fairshare_summaries()
+
+            for info in [fairshare_account_summary]:
                 for table_name, data in info.items():
                     output[table_name] = {
                         'type': 'dataframe',
