@@ -3,7 +3,6 @@
 from argparse import ArgumentParser, FileType
 from collections import OrderedDict
 from datetime import datetime
-from getpass import getuser
 import logging
 from json import dumps
 from sys import stdout
@@ -21,14 +20,12 @@ from ssnapshot.ssnapshot import (
     sinfo_ttl_cache,
     squeue_ttl_cache,
     sstat_ttl_cache,
-    get_fairshare,
 )
 
 
 def create_arg_parser() -> ArgumentParser:
     new_parser = ArgumentParser(
         description='ssnapshot returns a brief summary of the status of slurm',
-        #formatter_class=ArgumentDefaultsHelpFormatter,
     )
     new_parser.add_argument(
         '--verbose', '-v',

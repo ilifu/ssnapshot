@@ -6,10 +6,9 @@ from subprocess import PIPE, run
 from typing import List, Tuple
 
 from cachetools import cached, LRUCache, TTLCache
-from humanize import naturalsize, naturaldelta
 import numpy as np
 
-from pandas import DataFrame, merge, read_csv
+from pandas import DataFrame, read_csv
 
 fairshare_ttl_cache = TTLCache(maxsize=8, ttl=60)
 squeue_ttl_cache = TTLCache(maxsize=8, ttl=60)
@@ -113,7 +112,6 @@ def get_fairshare() -> DataFrame:
         StringIO(stdout),
         sep='|',
         dtype={
-            #'User': 'category',
             'RawShares': 'float32',
             'NormShares': 'float64',
             'RawUsage': 'uint64',
@@ -121,8 +119,6 @@ def get_fairshare() -> DataFrame:
             'EffectvUsage': 'float64',
             'FairShare': 'float64',
             'LevelFS': 'float64',
-            # 'GrpTRESMins': 'category',
-            # 'TRESRunMins': 'category',
         },
         converters={
             'Account': lambda x: x.strip(),
@@ -194,7 +190,15 @@ def get_sstat(squeue_data: DataFrame, users: list) -> DataFrame:
 
     job_ids = map(str, running_jobs['JOBID.1'].to_list())
 
-    exit_status, stdout, stderr = run_command('sstat', ['-j', ','.join(job_ids), '-P', '--format', 'AveCPU,MaxRSS,JobID,AveDiskRead,AveDiskWrite,NTasks'])
+    sstat_parameters = [
+        '-j',
+        ','.join(job_ids),
+        '-P',
+        '--format',
+        'AveCPU,MaxRSS,JobID,AveDiskRead,AveDiskWrite,NTasks',
+    ]
+
+    exit_status, stdout, stderr = run_command('sstat', sstat_parameters)
     sstat_data = read_csv(StringIO(stdout), sep='|')
     sstat_data['JobID'] = sstat_data['JobID'].apply(lambda x: x.split('.')[0]).astype(int)
     sstat_data['AveCPU_SECONDS'] = sstat_data['AveCPU'].apply(lambda x: dhhmmss_to_seconds(x.split('.')[0]))
@@ -206,39 +210,6 @@ def get_sstat(squeue_data: DataFrame, users: list) -> DataFrame:
 def grouped(iterable, n=2):
     """s -> (s0,s1,s2,...sn-1), (sn,sn+1,sn+2,...s2n-1), (s2n,s2n+1,s2n+2,...s3n-1), ..."""
     return zip(*[iter(iterable)]*n)
-
-
-def create_job_summaries() -> Tuple[DataFrame, DataFrame]:
-    squeue_data = get_squeue().copy()
-    squeue_grouped = squeue_data.groupby(['ACCOUNT', 'STATE'])  # , 'USER'])
-
-    aggregated_grouped = squeue_grouped.agg({
-        'CPUS': ['sum'],
-        'CPUTIME_LEFT_SECONDS': ['sum'],
-    })  # .sort_values(['STATE', ('CPUTIME_LEFT_SECONDS', 'sum')], ascending=False)
-
-    # aggregated_grouped.dropna(inplace=True)
-    aggregated_grouped.fillna(value=0, inplace=True)
-
-    logging.debug(aggregated_grouped.to_markdown())
-
-    aggregated_grouped.rename(
-        columns={'CPUS': 'cpus_total', 'CPUTIME_LEFT_SECONDS': 'cputime_remaining_seconds_total'},
-        inplace=True,
-    )
-
-    aggregated_grouped.columns = aggregated_grouped.columns.get_level_values(0)
-    aggregated_grouped.index.names = ['State', 'Account']
-
-    running_jobs = aggregated_grouped.loc["RUNNING"]
-    pending_jobs = aggregated_grouped.loc["PENDING"]
-
-    running_jobs.reset_index(inplace=True)
-    running_jobs.set_index('Account', inplace=True)
-    pending_jobs.reset_index(inplace=True)
-    pending_jobs.set_index('Account', inplace=True)
-
-    return running_jobs, pending_jobs
 
 
 def create_account_cpu_usage_summary() -> dict:
@@ -269,60 +240,60 @@ def create_account_cputime_remaining_summary() -> dict:
     return {'account_cputime_remaining_total_seconds': final_dataframe}
 
 
-def create_job_detail_summary(job_detail: DataFrame, human_readable=True) -> DataFrame:
-    def calc_cpu_time(row):
-        cpu_max = row['TIME_SECONDS']*row['CPUS']
-        total_used = row['AveCPU_SECONDS']*row['NODES']
-        percentage_used = total_used / cpu_max if cpu_max != 0 else 0
-        return f'{naturaldelta(timedelta(seconds=total_used))} / {naturaldelta(timedelta(seconds=cpu_max))} ({int(percentage_used*100)}%)'
-
-    def calc_memory_used(row):
-        def mem_str_to_bytes(mem_str):
-            factor = {
-                'B': 1,
-                'K': 1024,
-                'M': 1024**2,
-                'G': 1024**3,
-                'T': 1024**4,
-                'P': 1024**5
-            }
-            try:
-                return int(float(mem_str[:-1])*factor[mem_str[-1:]])
-            except TypeError:
-                return 0
-
-        memory_allocated = mem_str_to_bytes(row['MIN_MEMORY']) * row['NODES']
-        memory_used = mem_str_to_bytes(row['MaxRSS']) * row['NODES']
-        percentage_used = memory_used / memory_allocated if memory_allocated != 0 else 0
-        if human_readable:
-            return f'{naturalsize(memory_used, binary=True)} / {naturalsize(memory_allocated, binary=True)} ({int(percentage_used*100)}%)'
-        return f'{memory_used} / {memory_allocated} ({int(percentage_used*100)}%)'
-
-    job_detail = job_detail.drop([
-        'ACCOUNT',
-        'JOBID.1',
-        'TIME_LEFT',
-        'NODELIST',
-        'STATE',
-        'UID',
-        'AveCPU',
-        'AveDiskRead',
-        'AveDiskWrite',
-    ], axis=1)
-
-    job_detail['cpu_used'] = job_detail.apply(calc_cpu_time, axis=1)
-    job_detail['memory_used'] = job_detail.apply(calc_memory_used, axis=1)
-
-    job_detail = job_detail.drop([
-        'TIME_SECONDS',
-        'TIME_LEFT_SECONDS',
-        'MaxRSS',
-        'NTasks',
-        'NODES',
-        'AveCPU_SECONDS',
-    ], axis=1)
-    job_detail.set_index('JobID', inplace=True)
-    return job_detail
+# def create_job_detail_summary(job_detail: DataFrame, human_readable=True) -> DataFrame:
+#     def calc_cpu_time(row):
+#         cpu_max = row['TIME_SECONDS']*row['CPUS']
+#         total_used = row['AveCPU_SECONDS']*row['NODES']
+#         percentage_used = total_used / cpu_max if cpu_max != 0 else 0
+#         return f'{naturaldelta(timedelta(seconds=total_used))} / {naturaldelta(timedelta(seconds=cpu_max))} ({int(percentage_used*100)}%)'
+#
+#     def calc_memory_used(row):
+#         def mem_str_to_bytes(mem_str):
+#             factor = {
+#                 'B': 1,
+#                 'K': 1024,
+#                 'M': 1024**2,
+#                 'G': 1024**3,
+#                 'T': 1024**4,
+#                 'P': 1024**5
+#             }
+#             try:
+#                 return int(float(mem_str[:-1])*factor[mem_str[-1:]])
+#             except TypeError:
+#                 return 0
+#
+#         memory_allocated = mem_str_to_bytes(row['MIN_MEMORY']) * row['NODES']
+#         memory_used = mem_str_to_bytes(row['MaxRSS']) * row['NODES']
+#         percentage_used = memory_used / memory_allocated if memory_allocated != 0 else 0
+#         if human_readable:
+#             return f'{naturalsize(memory_used, binary=True)} / {naturalsize(memory_allocated, binary=True)} ({int(percentage_used*100)}%)'
+#         return f'{memory_used} / {memory_allocated} ({int(percentage_used*100)}%)'
+#
+#     job_detail = job_detail.drop([
+#         'ACCOUNT',
+#         'JOBID.1',
+#         'TIME_LEFT',
+#         'NODELIST',
+#         'STATE',
+#         'UID',
+#         'AveCPU',
+#         'AveDiskRead',
+#         'AveDiskWrite',
+#     ], axis=1)
+#
+#     job_detail['cpu_used'] = job_detail.apply(calc_cpu_time, axis=1)
+#     job_detail['memory_used'] = job_detail.apply(calc_memory_used, axis=1)
+#
+#     job_detail = job_detail.drop([
+#         'TIME_SECONDS',
+#         'TIME_LEFT_SECONDS',
+#         'MaxRSS',
+#         'NTasks',
+#         'NODES',
+#         'AveCPU_SECONDS',
+#     ], axis=1)
+#     job_detail.set_index('JobID', inplace=True)
+#     return job_detail
 
 
 def create_partition_memory_summary(human_readable: bool = True) -> dict:
@@ -333,11 +304,6 @@ def create_partition_memory_summary(human_readable: bool = True) -> dict:
         'MEMORY': ['sum'],
     })
     sinfo_mem.columns = sinfo_mem.columns.get_level_values(0)
-
-    # sinfo_mem['FREE_MEM'] = sinfo_mem['FREE_MEM'].apply(lambda x: int(x * (1024 ** 2)))
-    # sinfo_mem['MEMORY'] = sinfo_mem['MEMORY'].apply(lambda x: int(x * (1024 ** 2)))
-    # sinfo_mem['FREE_MEM'] = sinfo_mem[['FREE_MEM', 'MEMORY']].min(axis=1)
-    # sinfo_mem['ALLOCATED_MEM'] = sinfo_mem['MEMORY'] - sinfo_mem['FREE_MEM']
 
     if human_readable:
         pass
@@ -353,12 +319,8 @@ def create_partition_memory_summary(human_readable: bool = True) -> dict:
     return {'memory_total_bytes': sinfo_mem}
 
 
-def create_partition_cpu_count_summary(human_readable: bool = True) -> dict:
+def create_partition_cpu_count_summary() -> dict:
     sinfo_cpu = get_sinfo().copy()
-    # sinfo_cpu['allocated'] = sinfo_cpu['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[0]))
-    # sinfo_cpu['idle'] = sinfo_cpu['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[1]))
-    # sinfo_cpu['offline'] = sinfo_cpu['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[2]))
-    # sinfo_cpu['total'] = sinfo_cpu['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[3]))
 
     sinfo_cpu = sinfo_cpu.groupby(['PARTITION']).agg({
         'allocated': ['sum'],
@@ -370,9 +332,8 @@ def create_partition_cpu_count_summary(human_readable: bool = True) -> dict:
     return {'cpu_state_count': sinfo_cpu}
 
 
-def create_partition_cpu_load_summary(human_readable: bool = True) -> dict:
+def create_partition_cpu_load_summary() -> dict:
     sinfo_cpu = get_sinfo().copy()
-    # sinfo_cpu["allocated"] = sinfo_cpu['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[0]))
 
     sinfo_cpu = sinfo_cpu.groupby(['PARTITION']).agg({
         'CPU_LOAD': ['sum'],
