@@ -52,20 +52,6 @@ def create_arg_parser() -> ArgumentParser:
         help='Where to write output. Default is stdout',
     )
 
-    # human_readable_parser = new_parser.add_mutually_exclusive_group(required=False)
-    # human_readable_parser.add_argument(
-    #     '--human-readable',
-    #     dest='human_readable',
-    #     action='store_true',
-    #     help='output is easily human readable. (Default)',
-    # )
-    # human_readable_parser.add_argument(
-    #     '--no-human-readable',
-    #     dest='human_readable',
-    #     action='store_false',
-    #     help='output is machine readable.',
-    # )
-
     new_parser.add_argument(
         '--accounts', '-a',
         dest='tables',
@@ -78,7 +64,14 @@ def create_arg_parser() -> ArgumentParser:
         dest='tables',
         action='append_const',
         const='fairshare',
-        help='Show fairshare summary information',
+        help='Show fairshare summary information. (Default: False)',
+    )
+    new_parser.add_argument(
+        '--nodes', '-n',
+        dest='tables',
+        action='append_const',
+        const='nodes',
+        help='Show node summary information. (Default: False)',
     )
     new_parser.add_argument(
         '--partitions', '-p',
@@ -227,37 +220,52 @@ def main():
             cache.clear()
         output = OrderedDict([('header', {'value': 'Slurm Snapshot', 'time': datetime.now()})])
 
+        summaries = []
+
         if "accounts" in args.tables:
-            account_cpu_usage = create_account_cpu_usage_summary()
-            account_cputime_remaining = create_account_cputime_remaining_summary()
-            for info in [account_cpu_usage, account_cputime_remaining]:
-                for table_name, data in info.items():
-                    output[table_name] = {
-                        'type': 'dataframe',
-                        'dataframe': data,
-                    }
+            summaries.append(create_account_cpu_usage_summary())
+            summaries.append(create_account_cputime_remaining_summary())
+            # account_cpu_usage = create_account_cpu_usage_summary()
+            # account_cputime_remaining = create_account_cputime_remaining_summary()
+            # for info in [account_cpu_usage, account_cputime_remaining]:
+            #     for table_name, data in info.items():
+            #         output[table_name] = {
+            #             'type': 'dataframe',
+            #             'dataframe': data,
+            #         }
 
         if "partitions" in args.tables:
-            partition_mem = create_partition_memory_summary(args.human_readable)
-            partition_cpu = create_partition_cpu_count_summary(args.human_readable)
-            partition_load = create_partition_cpu_load_summary(args.human_readable)
-
-            for info in [partition_mem, partition_cpu, partition_load]:
-                for table_name, data in info.items():
-                    output[table_name] = {
-                        'type': 'dataframe',
-                        'dataframe': data,
-                    }
+            summaries.append(create_partition_memory_summary())
+            summaries.append(create_partition_cpu_count_summary())
+            summaries.append(create_partition_cpu_load_summary())
+            # partition_mem = create_partition_memory_summary(args.human_readable)
+            # partition_cpu = create_partition_cpu_count_summary(args.human_readable)
+            # partition_load = create_partition_cpu_load_summary(args.human_readable)
+            #
+            # for info in [partition_mem, partition_cpu, partition_load]:
+            #     for table_name, data in info.items():
+            #         output[table_name] = {
+            #             'type': 'dataframe',
+            #             'dataframe': data,
+            #         }
 
         if "fairshare" in args.tables:
-            fairshare_account_summary = create_fairshare_summaries()
+            summaries.append(create_fairshare_summaries())
+            # fairshare_account_summary = create_fairshare_summaries()
+            #
+            # for info in [fairshare_account_summary]:
+            #     for table_name, data in info.items():
+            #         output[table_name] = {
+            #             'type': 'dataframe',
+            #             'dataframe': data,
+            #         }
 
-            for info in [fairshare_account_summary]:
-                for table_name, data in info.items():
-                    output[table_name] = {
-                        'type': 'dataframe',
-                        'dataframe': data,
-                    }
+        for summary in summaries:
+            for table_name, data in summary.items():
+                output[table_name] = {
+                    'type': 'dataframe',
+                    'dataframe': data,
+                }
 
         output_string = ''
 

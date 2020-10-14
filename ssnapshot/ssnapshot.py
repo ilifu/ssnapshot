@@ -366,3 +366,8 @@ def create_fairshare_summaries() -> dict:
         'fairshare_rawshares': fairshare['RawShares'].to_frame(),
         'fairshare_normshares': fairshare['NormShares'].to_frame(),
     }
+
+
+def create_node_summaries() -> dict:
+    sinfo_data = get_sinfo()
+    return {}
