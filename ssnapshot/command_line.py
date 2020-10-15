@@ -167,21 +167,19 @@ def generate_json(output: dict) -> str:
 
 def generate_prometheus(output: dict) -> str:
     lines = []
-    timestamp = output.get('header', {}).get('time')
-    if not timestamp:
-        timestamp = datetime.now()
     for key, value in output.items():
         output_type = value.get('type')
         if output_type == 'dataframe':
             table_name = key.lower().replace(' ', '_')
             dataframe = value.get('dataframe')
             index_names = [name.lower().replace(' ', '_') for name in dataframe.index.names]
-            logging.debug('!!!!!!!!', dataframe)
             for row_index, row in dataframe.iterrows():
                 if type(row_index) != tuple:
                     row_index = (row_index, )
                 logging.debug(row_index)
-                label_string = ", ".join(f'{index_name}="{row_index[counter]}"' for counter, index_name in enumerate(index_names))
+                label_string = ", ".join([
+                    f'{index_name}="{row_index[counter]}"' for counter, index_name in enumerate(index_names)
+                ])
                 logging.debug(label_string)
                 for column_number, column in enumerate(dataframe.columns):
                     column_name = column.lower().replace(' ', '_').replace('/', 'per')
