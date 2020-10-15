@@ -66,7 +66,7 @@ def node_list_string_to_list(node_list: str) -> List[str]:
 
 
 def run_command(command: str, parameters: list) -> Tuple[int, str, str]:
-    logging.debug(f'Running command: { command } { " ".join(parameters) }')
+    logging.debug(f'Running command: { [command] + parameters }')
     cmd = run([command] + parameters, stdout=PIPE, stderr=PIPE, universal_newlines=True)
     if cmd.returncode != 0:
         raise Exception(
@@ -83,9 +83,9 @@ def get_squeue() -> DataFrame:
         StringIO(stdout),
         sep='|',
         dtype={
-            'STATE': 'category',
-            'USER': 'category',
-            'ACCOUNT': 'category',
+            'STATE': 'object',
+            'USER': 'object',
+            'ACCOUNT': 'object',
             'JOBID': 'uint32',
             'CPUS': 'uint32',
             'NODES': 'uint16',
