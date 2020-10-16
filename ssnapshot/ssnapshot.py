@@ -419,16 +419,10 @@ def create_node_summaries() -> dict:
         inplace=True,
     )
     cpu_load.dropna(inplace=True)
-
-    # final_dataframe = squeue_data.pivot_table(
-    #     index='ACCOUNT',
-    #     columns='STATE',
-    #     values='CPUS',
-    #     aggfunc=sum,
-    # )
     return {
         'host_cpu_load_percentage': cpu_load,
     }
+
 
 def create_top_users_summaries() -> dict:
     days = 3
