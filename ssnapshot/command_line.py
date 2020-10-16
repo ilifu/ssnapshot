@@ -14,9 +14,12 @@ from ssnapshot.ssnapshot import (
     create_account_cpu_usage_summary,
     create_account_cputime_remaining_summary,
     create_fairshare_summaries,
-    create_partition_memory_summary,
+    create_node_summaries,
     create_partition_cpu_count_summary,
     create_partition_cpu_load_summary,
+    create_partition_memory_summary,
+    create_partition_node_state_summary,
+    create_top_users_summaries,
     sinfo_ttl_cache,
     squeue_ttl_cache,
     sstat_ttl_cache,
@@ -79,6 +82,13 @@ def create_arg_parser() -> ArgumentParser:
         action='append_const',
         const='partitions',
         help='Show partition summary information. (Default: False)',
+    )
+    new_parser.add_argument(
+        '--top-users', '-t',
+        dest='tables',
+        action='append_const',
+        const='topusers',
+        help='Display Top Users. (Default: False)',
     )
 
     output_group = new_parser.add_mutually_exclusive_group()
@@ -223,40 +233,21 @@ def main():
         if "accounts" in args.tables:
             summaries.append(create_account_cpu_usage_summary())
             summaries.append(create_account_cputime_remaining_summary())
-            # account_cpu_usage = create_account_cpu_usage_summary()
-            # account_cputime_remaining = create_account_cputime_remaining_summary()
-            # for info in [account_cpu_usage, account_cputime_remaining]:
-            #     for table_name, data in info.items():
-            #         output[table_name] = {
-            #             'type': 'dataframe',
-            #             'dataframe': data,
-            #         }
 
         if "partitions" in args.tables:
             summaries.append(create_partition_memory_summary())
             summaries.append(create_partition_cpu_count_summary())
             summaries.append(create_partition_cpu_load_summary())
-            # partition_mem = create_partition_memory_summary(args.human_readable)
-            # partition_cpu = create_partition_cpu_count_summary(args.human_readable)
-            # partition_load = create_partition_cpu_load_summary(args.human_readable)
-            #
-            # for info in [partition_mem, partition_cpu, partition_load]:
-            #     for table_name, data in info.items():
-            #         output[table_name] = {
-            #             'type': 'dataframe',
-            #             'dataframe': data,
-            #         }
+            summaries.append(create_partition_node_state_summary())
 
         if "fairshare" in args.tables:
             summaries.append(create_fairshare_summaries())
-            # fairshare_account_summary = create_fairshare_summaries()
-            #
-            # for info in [fairshare_account_summary]:
-            #     for table_name, data in info.items():
-            #         output[table_name] = {
-            #             'type': 'dataframe',
-            #             'dataframe': data,
-            #         }
+
+        if "nodes" in args.tables:
+            summaries.append(create_node_summaries())
+
+        if "topusers" in args.tables:
+            summaries.append(create_top_users_summaries())
 
         for summary in summaries:
             for table_name, data in summary.items():

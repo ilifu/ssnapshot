@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 import logging
 from io import StringIO
 import re
@@ -152,14 +152,15 @@ def megabytes_to_bytes_converter(megabytes: str) -> int:
 
 @cached(cache=sinfo_ttl_cache)
 def get_sinfo() -> DataFrame:
-    exit_status, stdout, stderr = run_command('sinfo', ['-N', '--format=%n|%e|%C|%m|%O|%R|%c'])
+    exit_status, stdout, stderr = run_command('sinfo', ['-N', '--format=%n|%e|%C|%m|%O|%R|%c|%T'])
     sinfo_data = read_csv(
         StringIO(stdout),
         sep='|',
         dtype={
             'CPU_LOAD': 'Float64',
             'CPUS': 'uint16',
-            'PARTITION': 'category'
+            'PARTITION': 'object',
+            'STATE': 'object',
         },
         converters={
             'FREE_MEM': megabytes_to_bytes_converter,
@@ -180,6 +181,34 @@ def get_sinfo() -> DataFrame:
     logging.debug(f'sinfo output: { sinfo_data }')
 
     return sinfo_data
+
+
+def get_top_users(count: int = 16, days: int = 3) -> DataFrame:
+    now = datetime.now()
+    time_format = '%Y-%m-%dT%H:%M:%S'
+    end = now.strftime(time_format)
+    start = (now - timedelta(days=days)).strftime(time_format)
+    exit_status, stdout, stderr = run_command(
+        'sreport',
+        ['user', f'TopUsage', 'Group', f'TopCount={count}', f'Start={start}', f'End={end}', '-P'],
+    )
+    top_users_data = read_csv(
+        StringIO(stdout),
+        skiprows=[0, 1, 2, 3],
+        sep='|',
+        usecols=[
+            'Login', 'Account', 'Used',
+        ],
+        index_col='Login',
+        dtype={
+            'Login': 'object',
+            'User': 'uint32',
+        },
+        converters={
+            'Account': lambda x: x.split(', ')
+        }
+    )
+    return top_users_data
 
 
 @cached(cache=sstat_ttl_cache)
@@ -296,7 +325,7 @@ def create_account_cputime_remaining_summary() -> dict:
 #     return job_detail
 
 
-def create_partition_memory_summary(human_readable: bool = True) -> dict:
+def create_partition_memory_summary() -> dict:
     sinfo = get_sinfo().copy()
     logging.info(sinfo.columns)
     sinfo_mem = sinfo.groupby(['PARTITION']).agg({
@@ -305,18 +334,30 @@ def create_partition_memory_summary(human_readable: bool = True) -> dict:
     })
     sinfo_mem.columns = sinfo_mem.columns.get_level_values(0)
 
-    if human_readable:
-        pass
-    else:
-        sinfo_mem.rename(
-            columns={
-                'MEMORY': 'total',
-                'FREE_MEM': 'free',
-                'ALLOCATED_MEM': 'allocated',
-            },
-            inplace=True,
-        )
+
+    sinfo_mem.rename(
+        columns={
+            'MEMORY': 'total',
+            'FREE_MEM': 'free',
+            'ALLOCATED_MEM': 'allocated',
+        },
+        inplace=True,
+    )
     return {'memory_total_bytes': sinfo_mem}
+
+
+def create_partition_node_state_summary():
+    sinfo_data = get_sinfo().copy()
+    node_states = sinfo_data.pivot_table(
+            index='PARTITION',
+            columns='STATE',
+            values='HOSTNAMES',
+            aggfunc='count',
+        )
+    node_states.fillna(0, inplace=True)
+    return {
+        'node_state_count': node_states,
+    }
 
 
 def create_partition_cpu_count_summary() -> dict:
@@ -370,4 +411,36 @@ def create_fairshare_summaries() -> dict:
 
 def create_node_summaries() -> dict:
     sinfo_data = get_sinfo()
-    return {}
+    cpu_load = sinfo_data[['HOSTNAMES', 'CPU_LOAD']].copy()
+    cpu_load.set_index('HOSTNAMES', inplace=True)
+    cpu_load.index.rename('host', inplace=True)
+    cpu_load.rename(
+        columns={'CPU_LOAD': 'load'},
+        inplace=True,
+    )
+    cpu_load.dropna(inplace=True)
+
+    # final_dataframe = squeue_data.pivot_table(
+    #     index='ACCOUNT',
+    #     columns='STATE',
+    #     values='CPUS',
+    #     aggfunc=sum,
+    # )
+    return {
+        'host_cpu_load_percentage': cpu_load,
+    }
+
+def create_top_users_summaries() -> dict:
+    days = 3
+    top_users = get_top_users(count=16, days=3)
+    top_users.index.rename('username', inplace=True)
+    top_users.rename(
+        columns={
+            'Used': f'{days}-day_usage',
+        },
+        inplace=True,
+    )
+    top_users.drop('Account', axis='columns', inplace=True)
+    return {
+        'top_users_cpu_seconds_total': top_users,
+    }
