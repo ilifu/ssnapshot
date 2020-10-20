@@ -488,4 +488,5 @@ def create_reservation_summaries() -> dict:
 
     return {
         'reservation_seconds_total': reservations[['Allocated', 'Idle']],
+        'reservation_cpus_allocated_total': reservations[['TRES count']]
     }
