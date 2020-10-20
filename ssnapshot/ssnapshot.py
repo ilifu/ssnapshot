@@ -14,6 +14,8 @@ fairshare_ttl_cache = TTLCache(maxsize=8, ttl=60)
 squeue_ttl_cache = TTLCache(maxsize=8, ttl=60)
 sinfo_ttl_cache = TTLCache(maxsize=8, ttl=60)
 sstat_ttl_cache = TTLCache(maxsize=8, ttl=60)
+sreport_topusers_cache = TTLCache(maxsize=8, ttl=60)
+sreport_reservations_cache = TTLCache(maxsize=8, ttl=60)
 
 
 @cached(cache=LRUCache(maxsize=512))
@@ -182,7 +184,7 @@ def get_sinfo() -> DataFrame:
 
     return sinfo_data
 
-
+@cached(cache=sreport_topusers_cache)
 def get_top_users(count: int = 16, days: int = 3) -> DataFrame:
     now = datetime.now()
     time_format = '%Y-%m-%dT%H:%M:%S'
@@ -209,6 +211,47 @@ def get_top_users(count: int = 16, days: int = 3) -> DataFrame:
         }
     )
     return top_users_data
+
+
+@cached(cache=sreport_reservations_cache)
+def get_sreport_reservation():
+    now = datetime.now()
+    time_format = '%Y-%m-%dT%H:%M:%S'
+    end = now.strftime(time_format)
+    exit_status, stdout, stderr = run_command(
+        'sreport',
+        [
+            'reservation',
+            'Utilization',
+            '-P',
+            f'End={end}',
+            'Format="Name,Start,End,Allocated,Idle,Nodes,TotalTime,TresName,TresCount,TresTime"',
+        ],
+    )
+    reservation_data = read_csv(
+        StringIO(stdout),
+        skiprows=[0, 1, 2, 3],
+        sep='|',
+        usecols=[
+            'Name', 'Start', 'End', 'TotalTime', 'Idle', 'Allocated', 'TRES Name', 'TRES count', 'TRES Time',
+        ],
+        index_col='Name',
+        dtype={
+            'Name': 'object',
+            'Allocated': 'uint32',
+            'Idle': 'uint32',
+            'TRES Name': 'object',
+            'TRES count': 'uint32',
+        },
+        converters={
+            'Start': lambda x: datetime.strptime(x, time_format),
+            'End': lambda x: datetime.strptime(x, time_format),
+            'TRES Time': dhhmmss_to_seconds,
+            'TotalTime': dhhmmss_to_seconds,
+            'Nodes': lambda x: node_list_string_to_list,
+        }
+    )
+    return reservation_data
 
 
 @cached(cache=sstat_ttl_cache)
@@ -437,4 +480,12 @@ def create_top_users_summaries() -> dict:
     top_users.drop('Account', axis='columns', inplace=True)
     return {
         'top_users_cpu_seconds_total': top_users,
+    }
+
+
+def create_reservation_summaries() -> dict:
+    reservations = get_sreport_reservation()
+
+    return {
+        'reservation_seconds_total': reservations[['Allocated', 'Idle']],
     }

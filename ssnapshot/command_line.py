@@ -19,6 +19,7 @@ from ssnapshot.ssnapshot import (
     create_partition_cpu_load_summary,
     create_partition_memory_summary,
     create_partition_node_state_summary,
+    create_reservation_summaries,
     create_top_users_summaries,
     sinfo_ttl_cache,
     squeue_ttl_cache,
@@ -82,6 +83,13 @@ def create_arg_parser() -> ArgumentParser:
         action='append_const',
         const='partitions',
         help='Show partition summary information. (Default: False)',
+    )
+    new_parser.add_argument(
+        '--reservations', '-r',
+        dest='tables',
+        action='append_const',
+        const='reservations',
+        help='Display Reservation information. (Default: False)',
     )
     new_parser.add_argument(
         '--top-users', '-t',
@@ -223,6 +231,21 @@ def main():
     if args.output == 'prometheus':
         args.human_readable = False
 
+    summary_functions = {
+        'accounts': [create_account_cpu_usage_summary, create_account_cputime_remaining_summary],
+        'fairshare': [create_fairshare_summaries],
+        'nodes': [create_node_summaries],
+        'partitions': [
+            create_partition_memory_summary,
+            create_partition_cpu_count_summary,
+            create_partition_cpu_load_summary,
+            create_partition_node_state_summary,
+        ],
+        'reservations': [create_reservation_summaries],
+        'topusers': [create_top_users_summaries],
+
+    }
+
     while True:
         for cache in sinfo_ttl_cache, squeue_ttl_cache, sstat_ttl_cache:
             cache.clear()
@@ -230,31 +253,13 @@ def main():
 
         summaries = []
 
-        if "accounts" in args.tables:
-            summaries.append(create_account_cpu_usage_summary())
-            summaries.append(create_account_cputime_remaining_summary())
-
-        if "partitions" in args.tables:
-            summaries.append(create_partition_memory_summary())
-            summaries.append(create_partition_cpu_count_summary())
-            summaries.append(create_partition_cpu_load_summary())
-            summaries.append(create_partition_node_state_summary())
-
-        if "fairshare" in args.tables:
-            summaries.append(create_fairshare_summaries())
-
-        if "nodes" in args.tables:
-            summaries.append(create_node_summaries())
-
-        if "topusers" in args.tables:
-            summaries.append(create_top_users_summaries())
+        for table in args.tables:
+            for summary_function in summary_functions.get(table, []):
+                summaries.append(summary_function())
 
         for summary in summaries:
             for table_name, data in summary.items():
-                output[table_name] = {
-                    'type': 'dataframe',
-                    'dataframe': data,
-                }
+                output[table_name] = {'type': 'dataframe', 'dataframe': data}
 
         output_string = ''
 
