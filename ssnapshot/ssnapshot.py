@@ -179,6 +179,7 @@ def get_sinfo() -> DataFrame:
     sinfo_data['total'] = sinfo_data['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[3]))
 
     sinfo_data.drop(columns=['CPUS(A/I/O/T)'], inplace=True)
+    sinfo_data = sinfo_data.drop_duplicates(subset=['HOSTNAMES', 'CPU_LOAD'])
 
     logging.debug(f'sinfo output: { sinfo_data }')
 
@@ -251,6 +252,7 @@ def get_sreport_reservation():
             'Nodes': lambda x: node_list_string_to_list,
         }
     )
+    reservation_data = reservation_data.drop_duplicates(['Name'])
     return reservation_data
 
 
@@ -484,7 +486,7 @@ def create_top_users_summaries() -> dict:
 
 
 def create_reservation_summaries() -> dict:
-    reservations = get_sreport_reservation()
+    reservations = get_sreport_reservation().copy()
 
     return {
         'reservation_seconds_total': reservations[['Allocated', 'Idle']],
