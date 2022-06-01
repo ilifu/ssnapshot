@@ -179,7 +179,7 @@ def get_sinfo() -> DataFrame:
     sinfo_data['total'] = sinfo_data['CPUS(A/I/O/T)'].apply(lambda x: int(x.split('/')[3]))
 
     sinfo_data.drop(columns=['CPUS(A/I/O/T)'], inplace=True)
-    sinfo_data = sinfo_data.drop_duplicates(subset=['HOSTNAMES', 'CPU_LOAD'])
+    sinfo_data = sinfo_data.drop_duplicates(subset=['HOSTNAMES'])
 
     logging.debug(f'sinfo output: { sinfo_data }')
 
@@ -252,7 +252,7 @@ def get_sreport_reservation():
             'Nodes': lambda x: node_list_string_to_list,
         }
     )
-    reservation_data = reservation_data.drop_duplicates(subset=['Name'])
+    reservation_data = reservation_data[~reservation_data.index.duplicated()]
     return reservation_data
 
 
