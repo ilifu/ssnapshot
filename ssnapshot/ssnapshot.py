@@ -252,7 +252,7 @@ def get_sreport_reservation():
             'Nodes': lambda x: node_list_string_to_list,
         }
     )
-    reservation_data = reservation_data.drop_duplicates(['Name'])
+    reservation_data = reservation_data.drop_duplicates(subset=['Name'])
     return reservation_data
 
 
