@@ -252,7 +252,7 @@ def get_sreport_reservation():
             'Nodes': lambda x: node_list_string_to_list,
         }
     )
-    reservation_data = reservation_data[~reservation_data.index.duplicated()]
+    reservation_data = reservation_data[~reservation_data.index.duplicated(keep='last')]
     return reservation_data
 
 
